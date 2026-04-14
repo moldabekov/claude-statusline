@@ -4,6 +4,17 @@ input=$(cat)
 MODEL=$(echo "$input" | jq -r '.model.display_name // "unknown"')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir // "."')
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+TRANSCRIPT=$(echo "$input" | jq -r '.transcript_path // ""')
+
+# Effort level from transcript (only shown when explicitly set)
+EFFORT=""
+if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+  EFFORT=$(tac "$TRANSCRIPT" | grep -m1 '"content":"<local-command-stdout>Set effort level to' | grep -oP 'Set effort level to \K\w+')
+fi
+EFFORT_STR=""
+if [ -n "$EFFORT" ]; then
+  EFFORT_STR=" ($EFFORT)"
+fi
 
 # Tilde contraction
 DIR="${DIR/#$HOME/\~}"
@@ -25,4 +36,4 @@ else
 fi
 RESET='\033[0m'
 
-echo -e "[$USER@${HOSTNAME:-$(hostname)}] $DIR | $MODEL ${COLOR}[${BAR}] ${PCT}%${RESET}"
+echo -e "[$USER@${HOSTNAME:-$(hostname)}] $DIR | $MODEL$EFFORT_STR ${COLOR}[${BAR}] ${PCT}%${RESET}"
