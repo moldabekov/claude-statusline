@@ -8,6 +8,7 @@ TRANSCRIPT=$(echo "$input" | jq -r '.transcript_path // ""')
 WORKTREE=$(echo "$input" | jq -r '.workspace.git_worktree // ""')
 RATE_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // ""')
 RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // ""')
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // ""')
 
 # Effort level from transcript (only shown when explicitly set)
 EFFORT=""
@@ -55,4 +56,14 @@ if [ -n "$RATE_5H" ] && [ -n "$RATE_7D" ]; then
   LIMITS_STR=" | ${C5}5h: ${R5}%${RESET} / ${C7}7d: ${R7}%${RESET}"
 fi
 
-echo -e "[$USER@${HOSTNAME:-$(hostname)}] $DIR$WORKTREE_STR | $MODEL$EFFORT_STR ${COLOR}[${BAR}] ${PCT}%${RESET}$LIMITS_STR"
+# Cost
+COST_STR=""
+if [ -n "$COST" ] && [ "$COST" != "0" ]; then
+  COST_FMT=$(printf '%.2f' "$COST")
+  COST_STR=" | \$${COST_FMT}"
+fi
+
+BLUE='\033[34m'
+YELLOW='\033[33m'
+
+echo -e "${BLUE}[$USER@${HOSTNAME:-$(hostname)}]${RESET} ${YELLOW}$DIR${RESET}$WORKTREE_STR | $MODEL$EFFORT_STR ${COLOR}[${BAR}] ${PCT}%${RESET}$LIMITS_STR$COST_STR"
