@@ -178,7 +178,7 @@ CYAN='\033[36m'
 
 BRANCH_STR=""
 if [ -n "$BRANCH" ]; then
-  BRANCH_STR=" ⎇  ${CYAN}${BRANCH}${RESET}"
+  BRANCH_STR=" ⎇ ${CYAN}${BRANCH}${RESET}"
 fi
 
 # ---------- Line 3 data ----------
