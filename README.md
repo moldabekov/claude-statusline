@@ -6,7 +6,7 @@ Three lines of context — identity, session state, telemetry — in monochrome 
 ## Preview
 
 ```
-🖥  [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇  master ⏳ 38m | ✓ | ●1 +2 ?1 | ↑2 ↓1 | ≡3
+💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇  master ⏳ 38m | ✓ | ●1 +2 ?1 | ↑2 ↓1 | ≡3
 ⚡ [███░░░░░░░] 35% | ⏱  5h: 12% / 7d: 3% | $1.23 | 🔥 1.7K/m | ✦ Opus 4.7 (max)
 🕐 21:46 | 🔋 82% | ⧗ 1h15m | ❄ 88% | ⇅ 125.0K / 4.5K | ☁ prod | 🐍 venv | ▦ work | ⇋ SSH
 ```
@@ -34,7 +34,7 @@ Requires: `bash`, `jq`, `git`. Optional: `gh` for CI status.
 ### Line 1 — identity
 | Segment | Source | Notes |
 |---|---|---|
-| `🖥  [user@host]` | `$USER`, `$HOSTNAME` | user cyan, `@host` + brackets blue |
+| `💻 [user@host]` | `$USER`, `$HOSTNAME` | user cyan, `@host` + brackets blue |
 | `▸ dir` | `.workspace.current_dir` | yellow, `$HOME` → `~` |
 | `⎇  branch` | `git symbolic-ref` | cyan |
 | `⏳ age` | `git log -1 --format=%ct` | time since last commit (`s/m/h/d`) |
@@ -86,8 +86,8 @@ Everything lives in a single `statusline.sh`. Common tweaks:
 
 ## Troubleshooting
 
-- **`🖥` renders narrow** — the script adds a trailing space to compensate for text-style
-  rendering on some terminals. Swap for `🏠`, `💻`, or `🏡` if preferred.
+- **Host icon renders narrow** — the script adds a trailing space after the emoji to
+  compensate for text-style rendering on some terminals. Swap for `🏠`, `🖥`, or `🏡` if preferred.
 - **CI status missing on first render** — `gh` runs in the background and populates the
   cache; the icon shows up within a second or two on the next render.
 - **No battery / env / SSH / tmux metrics** — all conditional, they hide silently when
