@@ -20,6 +20,12 @@ if [ -n "$EFFORT" ]; then
   EFFORT_STR=" ($EFFORT)"
 fi
 
+# Git branch
+BRANCH=""
+if [ -d "$DIR" ]; then
+  BRANCH=$(git -C "$DIR" symbolic-ref --short HEAD 2>/dev/null || git -C "$DIR" rev-parse --short HEAD 2>/dev/null || true)
+fi
+
 # Worktree segment
 WORKTREE_STR=""
 if [ -n "$WORKTREE" ]; then
@@ -53,7 +59,7 @@ if [ -n "$RATE_5H" ] && [ -n "$RATE_7D" ]; then
   R7=${RATE_7D%.*}
   if [ "$R5" -ge 80 ]; then C5='\033[31m'; elif [ "$R5" -ge 60 ]; then C5='\033[33m'; else C5='\033[32m'; fi
   if [ "$R7" -ge 80 ]; then C7='\033[31m'; elif [ "$R7" -ge 60 ]; then C7='\033[33m'; else C7='\033[32m'; fi
-  LIMITS_STR=" | ${C5}5h: ${R5}%${RESET} / ${C7}7d: ${R7}%${RESET}"
+  LIMITS_STR=" | ⏱  ${C5}5h: ${R5}%${RESET} / ${C7}7d: ${R7}%${RESET}"
 fi
 
 # Cost
@@ -65,5 +71,12 @@ fi
 
 BLUE='\033[34m'
 YELLOW='\033[33m'
+CYAN='\033[36m'
 
-echo -e "${BLUE}[$USER@${HOSTNAME:-$(hostname)}]${RESET} ${YELLOW}$DIR${RESET}$WORKTREE_STR | $MODEL$EFFORT_STR ${COLOR}[${BAR}] ${PCT}%${RESET}$LIMITS_STR$COST_STR"
+BRANCH_STR=""
+if [ -n "$BRANCH" ]; then
+  BRANCH_STR=" ⎇  ${CYAN}${BRANCH}${RESET}"
+fi
+
+echo -e "🖥  ${BLUE}[$USER@${HOSTNAME:-$(hostname)}]${RESET} ▸ ${YELLOW}$DIR${RESET}${BRANCH_STR}${WORKTREE_STR}"
+echo -e "⚡ ${COLOR}[${BAR}] ${PCT}%${RESET}${LIMITS_STR}${COST_STR} | ✦ $MODEL$EFFORT_STR"
