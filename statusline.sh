@@ -140,7 +140,7 @@ if [ -n "$RATE_5H" ] && [ -n "$RATE_7D" ]; then
   R7=${RATE_7D%.*}
   if [ "$R5" -ge 80 ]; then C5='\033[31m'; elif [ "$R5" -ge 60 ]; then C5='\033[33m'; else C5='\033[32m'; fi
   if [ "$R7" -ge 80 ]; then C7='\033[31m'; elif [ "$R7" -ge 60 ]; then C7='\033[33m'; else C7='\033[32m'; fi
-  LIMITS_STR=" | ⏱  ${C5}5h: ${R5}%${RESET} / ${C7}7d: ${R7}%${RESET}"
+  LIMITS_STR=" | ⏱ ${C5}5h: ${R5}%${RESET} / ${C7}7d: ${R7}%${RESET}"
 fi
 
 # Cost
