@@ -82,27 +82,37 @@ if [ -d "$DIR" ] && git -C "$DIR" rev-parse --git-dir &>/dev/null; then
   fi
 
   # CI status via gh (cached 60s, populated in background)
-  if [ -n "$BRANCH" ] && command -v gh &>/dev/null; then
-    ci_key=$(echo "${DIR}${BRANCH}" | md5sum | cut -c1-12)
-    ci_cache="/tmp/claude-statusline-ci-${ci_key}"
-    now=$(date +%s)
-    mtime=$(stat -c %Y "$ci_cache" 2>/dev/null || echo 0)
-    if [ "$((now - mtime))" -gt 60 ]; then
-      ( cd "$DIR" && gh run list --branch "$BRANCH" --limit 1 --json status,conclusion 2>/dev/null \
-          > "${ci_cache}.tmp" && mv "${ci_cache}.tmp" "$ci_cache" ) &>/dev/null &
-    fi
-    if [ -f "$ci_cache" ]; then
-      ci_status=$(jq -r '.[0].status // ""' "$ci_cache" 2>/dev/null)
-      ci_conc=$(jq -r '.[0].conclusion // ""' "$ci_cache" 2>/dev/null)
-      case "$ci_conc" in
-        success) CI_STR=" | \033[32m✓\033[0m" ;;
-        failure|cancelled|timed_out|startup_failure) CI_STR=" | \033[31m✗\033[0m" ;;
-        *)
-          if [ "$ci_status" = "in_progress" ] || [ "$ci_status" = "queued" ] || [ "$ci_status" = "waiting" ]; then
-            CI_STR=" | \033[33m⋯\033[0m"
-          fi
-          ;;
-      esac
+  # Keyed by HEAD commit SHA so tag-triggered runs are matched (head_branch=tag_name
+  # would otherwise be excluded by --branch) and the cache auto-invalidates on new commits.
+  if command -v gh &>/dev/null; then
+    head_sha=$(git -C "$DIR" rev-parse HEAD 2>/dev/null)
+    if [ -n "$head_sha" ]; then
+      ci_key=$(echo "${DIR}${head_sha}" | md5sum | cut -c1-12)
+      ci_cache="/tmp/claude-statusline-ci-${ci_key}"
+      now=$(date +%s)
+      mtime=$(stat -c %Y "$ci_cache" 2>/dev/null || echo 0)
+      if [ "$((now - mtime))" -gt 60 ]; then
+        ( cd "$DIR" && gh run list --commit "$head_sha" --limit 1 --json status,conclusion 2>/dev/null \
+            > "${ci_cache}.tmp" && mv "${ci_cache}.tmp" "$ci_cache" ) &>/dev/null &
+      fi
+      if [ -f "$ci_cache" ]; then
+        ci_count=$(jq 'length' "$ci_cache" 2>/dev/null || echo 0)
+        if [ "$ci_count" = "0" ]; then
+          CI_STR=" | \033[90m○\033[0m"
+        else
+          ci_status=$(jq -r '.[0].status // ""' "$ci_cache" 2>/dev/null)
+          ci_conc=$(jq -r '.[0].conclusion // ""' "$ci_cache" 2>/dev/null)
+          case "$ci_conc" in
+            success) CI_STR=" | \033[32m✓\033[0m" ;;
+            failure|cancelled|timed_out|startup_failure) CI_STR=" | \033[31m✗\033[0m" ;;
+            *)
+              if [ "$ci_status" = "in_progress" ] || [ "$ci_status" = "queued" ] || [ "$ci_status" = "waiting" ]; then
+                CI_STR=" | \033[33m⋯\033[0m"
+              fi
+              ;;
+          esac
+        fi
+      fi
     fi
   fi
 fi
