@@ -7,7 +7,9 @@ PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1
 TRANSCRIPT=$(echo "$input" | jq -r '.transcript_path // ""')
 WORKTREE=$(echo "$input" | jq -r '.workspace.git_worktree // ""')
 RATE_5H=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // ""')
+RATE_5H_RESET=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // ""')
 RATE_7D=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // ""')
+RATE_7D_RESET=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // ""')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // ""')
 TOKENS_IN=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
 TOKENS_OUT=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0')
@@ -143,14 +145,37 @@ else
 fi
 RESET='\033[0m'
 
-# Rate limits (colorized independently)
+# Format reset countdown from epoch timestamp
+format_reset() {
+  local epoch=$1
+  if [ -z "$epoch" ] || [ "$epoch" = "null" ]; then return; fi
+  local remain=$(( epoch - $(date +%s) ))
+  if [ "$remain" -le 0 ]; then echo "now"; return; fi
+  if [ "$remain" -ge 86400 ]; then
+    echo "$(date -d "@$epoch" +%b%d)"
+  elif [ "$remain" -ge 3600 ]; then
+    echo "$((remain/3600))h$((remain%3600/60))m"
+  elif [ "$remain" -ge 60 ]; then
+    echo "$((remain/60))m"
+  else
+    echo "${remain}s"
+  fi
+}
+
+# Rate limits (colorized independently, with reset countdown)
 LIMITS_STR=""
 if [ -n "$RATE_5H" ] && [ -n "$RATE_7D" ]; then
   R5=${RATE_5H%.*}
   R7=${RATE_7D%.*}
   if [ "$R5" -ge 80 ]; then C5='\033[31m'; elif [ "$R5" -ge 60 ]; then C5='\033[33m'; else C5='\033[32m'; fi
   if [ "$R7" -ge 80 ]; then C7='\033[31m'; elif [ "$R7" -ge 60 ]; then C7='\033[33m'; else C7='\033[32m'; fi
-  LIMITS_STR=" | ⏱ ${C5}5h: ${R5}%${RESET} / ${C7}7d: ${R7}%${RESET}"
+  RESET5=$(format_reset "$RATE_5H_RESET")
+  RESET7=$(format_reset "$RATE_7D_RESET")
+  R5_STR="${C5}5h: ${R5}%${RESET}"
+  R7_STR="${C7}7d: ${R7}%${RESET}"
+  [ -n "$RESET5" ] && R5_STR="${C5}5h: ${R5}% ↻${RESET5}${RESET}"
+  [ -n "$RESET7" ] && R7_STR="${C7}7d: ${R7}% ↻${RESET7}${RESET}"
+  LIMITS_STR=" | ⏱ ${R5_STR} / ${R7_STR}"
 fi
 
 # Cost

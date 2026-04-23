@@ -7,7 +7,7 @@ Three lines of context — identity, session state, telemetry — in monochrome 
 
 ```
 💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇  master ⏳ 38m | ✓ | ●1 +2 ?1 | ↑2 ↓1 | ≡3
-⚡ [███░░░░░░░] 35% | ⏱  5h: 12% / 7d: 3% | $1.23 | 🔥 1.7K/m | ✦ Opus 4.7 (max)
+⚡ [███░░░░░░░] 35% | ⏱  5h: 12% ↻3h15m / 7d: 3% ↻Apr28 | $1.23 | 🔥 1.7K/m | ✦ Opus 4.7 (max)
 🕐 21:46 | 🔋 82% | ⧗ 1h15m | ❄ 88% | ⇅ 125.0K / 4.5K | ☁ prod | 🐍 venv | ▦ work | ⇋ SSH
 ```
 
@@ -48,7 +48,7 @@ Requires: `bash`, `jq`, `git`. Optional: `gh` for CI status.
 | Segment | Source | Notes |
 |---|---|---|
 | `⚡ [bar] NN%` | `.context_window.used_percentage` | color by threshold |
-| `⏱  5h: N% / 7d: N%` | `.rate_limits.*.used_percentage` | each threshold-colored independently |
+| `⏱  5h: N% ↻Xh / 7d: N% ↻MonDD` | `.rate_limits.*.used_percentage`, `.resets_at` | threshold-colored; ↻ shows reset countdown (<24h) or date (≥24h) |
 | `$N.NN` | `.cost.total_cost_usd` | rounded to 2 decimals |
 | `🔥 N/m` | `(tokens_in + tokens_out) / session_minutes` | green / yellow / red by burn rate |
 | `✦ Model (effort)` | `.model.display_name` + effort level from transcript | effort parsed from `/effort` command output |
