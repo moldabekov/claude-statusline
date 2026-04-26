@@ -94,25 +94,47 @@ if [ -d "$DIR" ] && git -C "$DIR" rev-parse --git-dir &>/dev/null; then
       now=$(date +%s)
       mtime=$(stat -c %Y "$ci_cache" 2>/dev/null || echo 0)
       if [ "$((now - mtime))" -gt 60 ]; then
-        ( cd "$DIR" && gh run list --commit "$head_sha" --limit 1 --json status,conclusion 2>/dev/null \
+        ( cd "$DIR" && gh run list --commit "$head_sha" --limit 1 --json status,conclusion,updatedAt 2>/dev/null \
             > "${ci_cache}.tmp" && mv "${ci_cache}.tmp" "$ci_cache" ) &>/dev/null &
       fi
       if [ -f "$ci_cache" ]; then
         ci_count=$(jq 'length' "$ci_cache" 2>/dev/null || echo 0)
         if [ "$ci_count" = "0" ]; then
-          CI_STR=" | \033[90m○\033[0m"
+          CI_STR=" | ○"
         else
           ci_status=$(jq -r '.[0].status // ""' "$ci_cache" 2>/dev/null)
           ci_conc=$(jq -r '.[0].conclusion // ""' "$ci_cache" 2>/dev/null)
+          ci_time=$(jq -r '.[0].updatedAt // ""' "$ci_cache" 2>/dev/null)
+          ci_age=""
+          if [ -n "$ci_time" ]; then
+            ci_epoch=$(date -d "$ci_time" +%s 2>/dev/null)
+            if [ -n "$ci_epoch" ]; then
+              ci_delta=$((now - ci_epoch))
+              if [ "$ci_delta" -lt 60 ]; then ci_age="${ci_delta}s"
+              elif [ "$ci_delta" -lt 3600 ]; then ci_age="$((ci_delta / 60))m"
+              elif [ "$ci_delta" -lt 86400 ]; then ci_age="$((ci_delta / 3600))h"
+              else ci_age="$((ci_delta / 86400))d"
+              fi
+            fi
+          fi
+          ci_color=""
+          ci_icon=""
           case "$ci_conc" in
-            success) CI_STR=" | \033[32m✓\033[0m" ;;
-            failure|cancelled|timed_out|startup_failure) CI_STR=" | \033[31m✗\033[0m" ;;
+            success) ci_color="32"; ci_icon="✓" ;;
+            failure|cancelled|timed_out|startup_failure) ci_color="31"; ci_icon="✗" ;;
             *)
               if [ "$ci_status" = "in_progress" ] || [ "$ci_status" = "queued" ] || [ "$ci_status" = "waiting" ]; then
-                CI_STR=" | \033[33m⋯\033[0m"
+                ci_color="33"; ci_icon="⋯"
               fi
               ;;
           esac
+          if [ -n "$ci_icon" ]; then
+            CI_STR=" | \033[${ci_color}m${ci_icon}"
+            if [ -n "$ci_age" ]; then
+              CI_STR="${CI_STR} ${ci_age}"
+            fi
+            CI_STR="${CI_STR}\033[0m"
+          fi
         fi
       fi
     fi

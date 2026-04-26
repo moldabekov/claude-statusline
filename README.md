@@ -6,7 +6,7 @@ Three lines of context — identity, session state, telemetry — in monochrome 
 ## Preview
 
 ```
-💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇  master ⏳ 38m | ✓ | ●1 +2 ?1 | ↑2 ↓1 | ≡3
+💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇  master ⏳ 38m | ✓ 5m | ●1 +2 ?1 | ↑2 ↓1 | ≡3
 ⚡ [███░░░░░░░] 35% | ⏱  5h: 12% ↻3h15m / 7d: 3% ↻Apr28 | $1.23 | 🔥 1.7K/m | ✦ Opus 4.7 (max)
 🕐 21:46 | 🔋 82% | ⧗ 1h15m | ❄ 88% | ⇅ 125.0K / 4.5K | ☁ prod | 🐍 venv | ▦ work | ⇋ SSH
 ```
@@ -38,7 +38,8 @@ Requires: `bash`, `jq`, `git`. Optional: `gh` for CI status.
 | `▸ dir` | `.workspace.current_dir` | yellow, `$HOME` → `~` |
 | `⎇  branch` | `git symbolic-ref` | cyan |
 | `⏳ age` | `git log -1 --format=%ct` | time since last commit (`s/m/h/d`) |
-| `✓ / ✗ / ⋯` | `gh run list` | CI status, cached 60s (needs `gh` auth) |
+| `✓ 5m / ✗ 2h / ⋯ 12s` | `gh run list` | CI status + last run age, cached 60s (needs `gh` auth) |
+| `○` | `gh run list` | no CI runs for current HEAD (default foreground color) |
 | `●N +N ?N` | `git status --porcelain` | modified / staged / untracked (only non-zero) |
 | `↑N ↓N` | `git rev-list ...@{upstream}` | ahead / behind (only non-zero) |
 | `≡N` | `git stash list` | stash count (only when > 0) |
