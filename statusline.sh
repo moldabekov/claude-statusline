@@ -195,8 +195,8 @@ if [ -n "$RATE_5H" ] && [ -n "$RATE_7D" ]; then
   RESET7=$(format_reset "$RATE_7D_RESET")
   R5_STR="${C5}5h: ${R5}%${RESET}"
   R7_STR="${C7}7d: ${R7}%${RESET}"
-  [ -n "$RESET5" ] && R5_STR="${C5}5h: ${R5}% ↻${RESET5}${RESET}"
-  [ -n "$RESET7" ] && R7_STR="${C7}7d: ${R7}% ↻${RESET7}${RESET}"
+  [ -n "$RESET5" ] && R5_STR="${C5}5h: ${R5}% ↻ ${RESET5}${RESET}"
+  [ -n "$RESET7" ] && R7_STR="${C7}7d: ${R7}% ↻ ${RESET7}${RESET}"
   LIMITS_STR=" | ⏱ ${R5_STR} / ${R7_STR}"
 fi
 
