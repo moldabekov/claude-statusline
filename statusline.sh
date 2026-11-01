@@ -185,19 +185,28 @@ format_reset() {
 }
 
 # Rate limits (colorized independently, with reset countdown)
+# Render one rate-limit window: format_limit <label> <used_pct> <resets_at>
+format_limit() {
+  local label=$1 pct=$2 reset_at=$3
+  if [ -z "$pct" ] || [ "$pct" = "null" ]; then return; fi
+  local p=${pct%.*} c reset_str
+  if [ "$p" -ge 80 ]; then c='\033[31m'; elif [ "$p" -ge 60 ]; then c='\033[33m'; else c='\033[32m'; fi
+  reset_str=$(format_reset "$reset_at")
+  if [ -n "$reset_str" ]; then
+    echo "${c}${label}: ${p}% ↻ ${reset_str}${RESET}"
+  else
+    echo "${c}${label}: ${p}%${RESET}"
+  fi
+}
+
+# Each window is optional — show whichever ones are present
 LIMITS_STR=""
-if [ -n "$RATE_5H" ] && [ -n "$RATE_7D" ]; then
-  R5=${RATE_5H%.*}
-  R7=${RATE_7D%.*}
-  if [ "$R5" -ge 80 ]; then C5='\033[31m'; elif [ "$R5" -ge 60 ]; then C5='\033[33m'; else C5='\033[32m'; fi
-  if [ "$R7" -ge 80 ]; then C7='\033[31m'; elif [ "$R7" -ge 60 ]; then C7='\033[33m'; else C7='\033[32m'; fi
-  RESET5=$(format_reset "$RATE_5H_RESET")
-  RESET7=$(format_reset "$RATE_7D_RESET")
-  R5_STR="${C5}5h: ${R5}%${RESET}"
-  R7_STR="${C7}7d: ${R7}%${RESET}"
-  [ -n "$RESET5" ] && R5_STR="${C5}5h: ${R5}% ↻ ${RESET5}${RESET}"
-  [ -n "$RESET7" ] && R7_STR="${C7}7d: ${R7}% ↻ ${RESET7}${RESET}"
+R5_STR=$(format_limit "5h" "$RATE_5H" "$RATE_5H_RESET")
+R7_STR=$(format_limit "7d" "$RATE_7D" "$RATE_7D_RESET")
+if [ -n "$R5_STR" ] && [ -n "$R7_STR" ]; then
   LIMITS_STR=" | ⏱ ${R5_STR} / ${R7_STR}"
+elif [ -n "$R5_STR" ] || [ -n "$R7_STR" ]; then
+  LIMITS_STR=" | ⏱ ${R5_STR}${R7_STR}"
 fi
 
 # Cost
