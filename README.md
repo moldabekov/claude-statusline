@@ -2,7 +2,8 @@
 
 Compact, information-dense statuslines for [Claude Code](https://claude.com/claude-code) and
 [Pi](https://pi.dev). Both variants show three adaptive lines of identity, session state, and
-telemetry using monochrome Unicode icons and a handful of emoji—no Nerd Fonts required.
+telemetry using monochrome Unicode icons and a handful of emoji. Only the CPU, RAM, and swap icons
+need a [Nerd Font](https://www.nerdfonts.com/); everything else renders with standard fonts.
 
 ## Preview
 
@@ -11,7 +12,7 @@ telemetry using monochrome Unicode icons and a handful of emoji—no Nerd Fonts 
 ```text
 💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇ master ⏳ 38m | ✓ 5m | ●1 +2 ?1 | ↑2 ↓1 | ≡3
 ⚡ [███░░░░░░░] 35% | ⏱ 5h: 12% ↻3h15m / 7d: 3% ↻Apr28 | $1.23 | 🔥 1.7K/m | ✦ Opus 4.7 (max)
-🕐 21:46 | 🔋 82% | ⧗ 1h15m | ❄ 88% | ⇅ 125.0K / 4.5K | ☁ prod | 🐍 venv | ▦ work | ⇋ SSH
+🕐 21:46 | ⧗ 1h15m | 󰻠 1.42 | 󰍛 9.8/16G | 󰓦 0.5/2.0G | ❄ 88% | ⇅ 125.0K / 4.5K | ☁ prod | 🐍 venv | ▦ work | ⇋ SSH | 🔋 82%
 ```
 
 ### Pi
@@ -19,7 +20,7 @@ telemetry using monochrome Unicode icons and a handful of emoji—no Nerd Fonts 
 ```text
 💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇ master | PR #42 ✓ | CI 5✓ | Δ+42−8 | ●1 ?1     ○ idle
 ⚡ [███░░░░░░░] 35% | CTX 70.0K/200.0K · 130.0K left · ↻1 | $1.23 | 🔥 1.7K/m | ✦ Claude Opus 4.6 (high)
-🕐 21:46 | ⬡ node22.22 | 🐍 3.13@venv | 🦀 1.91.0 | 🔋 82% | ⧗ 1h15m | ❄ 88% | ⇅ 125.0K / 4.5K | ▦ work
+🕐 21:46 | ⧗ 1h15m | 󰻠 1.42 | 󰍛 9.8/16G | 󰓦 0.5/2.0G | ⬡ node22.22 | 🐍 3.13@venv | 🦀 1.91.0 | ❄ 88% | ⇅ 125.0K / 4.5K | ▦ work | 🔋 82%
 ```
 
 Pi adapts to terminal width, omitting lower-priority segments before truncating. It can also add a
@@ -29,7 +30,8 @@ Color-coded thresholds:
 
 - **Context and rate-limit percentages:** yellow at 60%, red at 80%
 - **Burn rate:** green below 3K tokens/min, yellow from 3K–10K, red above 10K
-- **Pi host pressure:** CPU/RAM/disk only appear when elevated and turn red at critical levels
+- **Host load:** CPU (load per core), RAM, and swap use yellow at 60%, red at 80%
+- **Pi disk:** appears only from 85% full and turns red at 95%
 
 ## Install
 
@@ -56,6 +58,7 @@ automatically; restart Pi or run `/reload` after installation.
 - `bash`
 - `git` for repository segments
 - `jq` for the Claude Code statusline
+- A [Nerd Font](https://www.nerdfonts.com/) in your terminal for the CPU, RAM, and swap icons
 - Optional: authenticated [`gh`](https://cli.github.com/) for CI and pull-request data
 - Optional runtime CLIs (`go`, `python3`, `rustc`, `docker`, `kubectl`, and others) are queried by
   Pi only when matching project files are detected; missing tools are ignored
@@ -91,14 +94,17 @@ automatically; restart Pi or run `/reload` after installation.
 | Segment | Source | Conditional |
 |---|---|---|
 | `🕐 HH:MM` | Local clock | Always |
-| `🔋 NN%` | Linux power supply | Battery devices only |
 | `⧗ duration` | `.cost.total_duration_ms` | Hidden when zero |
+| `󰻠 N.NN` | 1-minute load average (`/proc/loadavg`, `sysctl vm.loadavg`) | Linux and macOS; colored by load per core |
+| `󰍛 used/totalG` | Linux `MemTotal − MemAvailable`; macOS app + wired + compressed (`vm_stat`) | Linux and macOS; macOS uses the same components as Activity Monitor's "Memory Used" |
+| `󰓦 used/totalG` | Swap from `/proc/meminfo` or `sysctl vm.swapusage` | Hidden when no swap is configured |
 | `❄ NN%` | Cache read/write tokens | Hidden without cache tokens |
 | `⇅ in / out` | Context token totals | Hidden when both are zero |
 | `☁ profile` | `$AWS_PROFILE` | AWS profile set |
 | `🐍 env` | `$VIRTUAL_ENV` or `.python-version` | Python environment detected |
 | `▦ session` | tmux | Inside tmux |
 | `⇋ SSH` | SSH environment | Remote session |
+| `🔋 NN%` | Linux power supply or macOS `pmset -g batt` | Battery devices only; always the last segment |
 
 ## Pi statusline
 
@@ -121,11 +127,15 @@ extensions.
 
 ### Line 3 — project-aware telemetry
 
+- Leads with session age, then host load: CPU load average, RAM, and swap, computed the same way as
+  the Claude Code statusline (on other platforms, RAM comes from Node and swap is hidden)
+- Adds a disk warning only when the working directory's filesystem is nearly full
 - Shows versions only for runtimes detected in the current project: Go, Node.js, Python, Rust, Zig,
   Java, and Terraform
-- Detects containers, Docker context, Kubernetes context, AWS profile/region, battery, tmux, and SSH
-- Adds CPU, RAM, and disk warnings only when pressure is high
-- Includes session age, cache ratio, and cumulative input/output tokens
+- Detects containers, Docker context, Kubernetes context, AWS profile/region, tmux, and SSH
+- Includes cache ratio and cumulative input/output tokens
+- Ends with battery level (Linux sysfs or macOS `pmset`); as the last segment, it is the first to be
+  dropped on narrow terminals
 
 ## Performance
 
@@ -138,8 +148,8 @@ extensions.
 ### Pi
 
 - Footer rendering uses cached state; external commands never run in the render path.
-- Git state refreshes every 10 seconds, GitHub data at most every 60 seconds, and system/runtime data
-  every 60 seconds.
+- Git state and host RAM/swap refresh every 10 seconds, GitHub data at most every 60 seconds, and
+  system/runtime data every 60 seconds. The CPU load average is read live on each render.
 - Runtime commands are gated by project-file detection, and all subprocesses are cancelled when the
   footer is disposed.
 
@@ -160,3 +170,5 @@ extensions.
 - **Battery, runtime, cloud, tmux, or SSH segments are absent:** these are conditional and hide when
   unavailable or irrelevant to the current project.
 - **Host icon renders narrow:** swap `💻` for `🏠`, `🖥`, or `🏡` in the relevant statusline file.
+- **CPU, RAM, or swap icon shows as a box:** the terminal font is not a Nerd Font. Install one, or
+  replace `ICON_CPU`, `ICON_RAM`, and `ICON_SWAP` in either file with plain symbols such as `▣ ▤ ⇄`.

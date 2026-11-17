@@ -115,6 +115,13 @@ type UsageTotals = {
 	cost: number;
 };
 
+type HostMemory = {
+	memTotalKb: number;
+	memUsedKb: number;
+	swapTotalKb: number;
+	swapUsedKb: number;
+};
+
 const EMPTY_GIT_STATE: GitState = {
 	isRepo: false,
 	modified: 0,
@@ -499,6 +506,110 @@ async function readTrimmed(path: string): Promise<string | undefined> {
 	}
 }
 
+const KB_PER_GB = 1_048_576;
+// Nerd Font icons
+const ICON_CPU = "\u{F0EE0}"; // nf-md-cpu_64_bit
+const ICON_RAM = "\u{F035B}"; // nf-md-memory
+const ICON_SWAP = "\u{F04E6}"; // nf-md-sync
+
+// Linux: used RAM = MemTotal − MemAvailable (matches `free`); MemFree + Buffers + Cached before kernel 3.14.
+function parseLinuxMeminfo(text: string): HostMemory | undefined {
+	const fields: Record<string, number> = Object.fromEntries(
+		text.split("\n").flatMap((line) => {
+			const match = line.match(/^(\w+):\s+(\d+)/);
+			return match ? [[match[1], Number(match[2])]] : [];
+		}),
+	);
+	const memTotalKb = fields.MemTotal ?? 0;
+	if (memTotalKb <= 0) return undefined;
+	const availableKb = fields.MemAvailable ?? (fields.MemFree ?? 0) + (fields.Buffers ?? 0) + (fields.Cached ?? 0);
+	const swapTotalKb = fields.SwapTotal ?? 0;
+	return {
+		memTotalKb,
+		memUsedKb: clamp(memTotalKb - availableKb, 0, memTotalKb),
+		swapTotalKb,
+		swapUsedKb: clamp(swapTotalKb - (fields.SwapFree ?? swapTotalKb), 0, swapTotalKb),
+	};
+}
+
+// `sysctl vm.swapusage` sizes such as "13312.00M"; sysctl reports megabytes when the unit is missing.
+function swapSizeKb(value: string | undefined): number {
+	const match = value?.match(/^([\d.]+)([KMG])?$/i);
+	if (!match) return 0;
+	const amount = Number(match[1]);
+	const unit = (match[2] ?? "M").toUpperCase();
+	if (unit === "G") return amount * KB_PER_GB;
+	if (unit === "K") return amount;
+	return amount * 1_024;
+}
+
+// macOS: used RAM = app (anonymous − purgeable) + wired + compressed, the parts of Activity Monitor's "Memory Used".
+function parseDarwinMemory(sysctl: string, vmStat: string): HostMemory | undefined {
+	const memBytes = finiteNumber(sysctl.match(/^hw\.memsize:\s*(\d+)/m)?.[1]);
+	const pageBytes = finiteNumber(vmStat.match(/page size of (\d+) bytes/)?.[1]);
+	if (!memBytes || !pageBytes) return undefined;
+	const pages = (label: string): number | undefined =>
+		finiteNumber(vmStat.match(new RegExp(`^${label}:\\s+(\\d+)`, "m"))?.[1]);
+	const anonymous = pages("Anonymous pages");
+	const appPages = anonymous !== undefined ? anonymous - (pages("Pages purgeable") ?? 0) : (pages("Pages active") ?? 0);
+	const usedPages = appPages + (pages("Pages wired down") ?? 0) + (pages("Pages occupied by compressor") ?? 0);
+	const memTotalKb = memBytes / 1_024;
+	const swapLine = sysctl.match(/^vm\.swapusage:(.*)$/m)?.[1] ?? "";
+	const swapTotalKb = swapSizeKb(swapLine.match(/total = (\S+)/)?.[1]);
+	return {
+		memTotalKb,
+		memUsedKb: clamp((usedPages * pageBytes) / 1_024, 0, memTotalKb),
+		swapTotalKb,
+		swapUsedKb: clamp(swapSizeKb(swapLine.match(/used = (\S+)/)?.[1]), 0, swapTotalKb),
+	};
+}
+
+// Other platforms: Node's view of RAM; swap is unavailable.
+function nodeMemory(): HostMemory | undefined {
+	const memTotalKb = totalmem() / 1_024;
+	if (memTotalKb <= 0) return undefined;
+	return {
+		memTotalKb,
+		memUsedKb: clamp(memTotalKb - freemem() / 1_024, 0, memTotalKb),
+		swapTotalKb: 0,
+		swapUsedKb: 0,
+	};
+}
+
+function formatMemory(usedKb: number, totalKb: number): string {
+	const totalGb = totalKb / KB_PER_GB;
+	return `${(usedKb / KB_PER_GB).toFixed(1)}/${totalGb >= 10 ? totalGb.toFixed(0) : totalGb.toFixed(1)}G`;
+}
+
+// CPU load average (colored by load per core), RAM, swap when configured, and disk only when nearly full.
+function hostSegments(
+	memory: HostMemory | undefined,
+	diskUsedPercent: number | undefined,
+	colorize: (color: MeterColor, text: string) => string,
+): string[] {
+	const load = process.platform === "win32" ? undefined : loadavg()[0];
+	const cores = Math.max(1, cpus().length);
+	const segments = [
+		load === undefined ? undefined : colorize(meterColor((load / cores) * 100), `${ICON_CPU} ${load.toFixed(2)}`),
+		memory && memory.memTotalKb > 0
+			? colorize(
+					meterColor((memory.memUsedKb * 100) / memory.memTotalKb),
+					`${ICON_RAM} ${formatMemory(memory.memUsedKb, memory.memTotalKb)}`,
+				)
+			: undefined,
+		memory && memory.swapTotalKb > 0
+			? colorize(
+					meterColor((memory.swapUsedKb * 100) / memory.swapTotalKb),
+					`${ICON_SWAP} ${formatMemory(memory.swapUsedKb, memory.swapTotalKb)}`,
+				)
+			: undefined,
+		diskUsedPercent !== undefined && diskUsedPercent >= 85
+			? colorize(diskUsedPercent >= 95 ? "error" : "warning", `DISK ${diskUsedPercent}%`)
+			: undefined,
+	];
+	return segments.filter((segment): segment is string => segment !== undefined).map((segment) => ` | ${segment}`);
+}
+
 export default function statuslineExtension(pi: ExtensionAPI) {
 	let rateWindows: RateWindow[] = [];
 	let rateProvider: string | undefined;
@@ -586,6 +697,9 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 			let ciHeadSha: string | undefined;
 			let ciLastFetch = 0;
 			let ciRefreshRunning = false;
+			let hostMemory: HostMemory | undefined;
+			let hostRefreshRunning = false;
+			let lastHostRefresh = 0;
 			const abortController = new AbortController();
 
 			const localRequestRender = () => {
@@ -812,7 +926,11 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 						const capacity = finiteNumber(await readTrimmed(`/sys/class/power_supply/${battery}/capacity`));
 						if (capacity !== undefined) return clamp(Math.round(capacity), 0, 100);
 					}
-					return undefined;
+					if (process.platform !== "darwin") return undefined;
+					// " -InternalBattery-0 (id=…)	85%; charging; …"; desktop Macs print no battery line.
+					const result = await run("/usr/bin/pmset", ["-g", "batt"], 2_500);
+					const percent = result?.code === 0 ? finiteNumber(result.stdout.match(/InternalBattery[^\n]*?(\d+)%/)?.[1]) : undefined;
+					return percent === undefined ? undefined : clamp(Math.round(percent), 0, 100);
 				})();
 				const goPromise = runtimes.go
 					? (async () => {
@@ -966,6 +1084,44 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 				});
 			};
 
+			const readHostMemory = async (): Promise<HostMemory | undefined> => {
+				if (process.platform === "linux") {
+					try {
+						return parseLinuxMeminfo(await readFile("/proc/meminfo", "utf8")) ?? nodeMemory();
+					} catch {
+						return nodeMemory();
+					}
+				}
+				if (process.platform === "darwin") {
+					// Node's freemem() on macOS counts only free pages, so hide RAM rather than overstate it.
+					const [sysctl, vmStat] = await Promise.all([
+						run("/usr/sbin/sysctl", ["hw.memsize", "vm.swapusage"], 2_500),
+						run("/usr/bin/vm_stat", [], 2_500),
+					]);
+					if (sysctl?.code !== 0 || vmStat?.code !== 0) return undefined;
+					return parseDarwinMemory(sysctl.stdout, vmStat.stdout);
+				}
+				return nodeMemory();
+			};
+
+			const scheduleHostRefresh = () => {
+				if (disposed || hostRefreshRunning) return;
+				hostRefreshRunning = true;
+				lastHostRefresh = Date.now();
+				void readHostMemory()
+					.then((memory) => {
+						if (disposed) return;
+						hostMemory = memory;
+						localRequestRender();
+					})
+					.catch(() => {
+						// Host memory is optional; keep the last reading.
+					})
+					.finally(() => {
+						hostRefreshRunning = false;
+					});
+			};
+
 			const unsubscribeBranch = footerData.onBranchChange(() => {
 				scheduleGitRefresh();
 				localRequestRender();
@@ -973,12 +1129,14 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 
 			scheduleGitRefresh();
 			scheduleSystemRefresh();
+			scheduleHostRefresh();
 			const timer = setInterval(() => {
 				if (disposed) return;
 				localRequestRender();
 				const now = Date.now();
 				if (now - lastGitRefresh >= 10_000) scheduleGitRefresh();
 				if (now - lastSystemRefresh >= 60_000) scheduleSystemRefresh();
+				if (now - lastHostRefresh >= 10_000) scheduleHostRefresh();
 			}, 1_000);
 
 			return {
@@ -1166,6 +1324,10 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					const date = new Date(now);
 					const line3Base = `🕐 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 					const line3Segments: string[] = [];
+					if (durationSeconds >= 1) line3Segments.push(` | ⧗ ${formatDuration(durationSeconds)}`);
+					line3Segments.push(
+						...hostSegments(hostMemory, systemState.diskUsedPercent, (color, text) => theme.fg(color, text)),
+					);
 					if (systemState.goVersion) {
 						line3Segments.push(` | Go ${clean(systemState.goVersion)}${systemState.goWorkspace ? " work" : ""}`);
 					}
@@ -1189,23 +1351,6 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 						line3Segments.push(` | ☁ ${[systemState.awsProfile, systemState.awsRegion].filter(Boolean).join("@")}`);
 					}
 
-					const coreCount = Math.max(1, cpus().length);
-					const cpuPressure = clamp(loadavg()[0] / coreCount * 100, 0, 999);
-					const memoryPressure = totalmem() > 0 ? clamp((1 - freemem() / totalmem()) * 100, 0, 100) : 0;
-					if (cpuPressure >= 80) {
-						line3Segments.push(` | ${theme.fg(cpuPressure >= 100 ? "error" : "warning", `CPU ${Math.round(cpuPressure)}%`)}`);
-					}
-					if (memoryPressure >= 80) {
-						line3Segments.push(` | ${theme.fg(memoryPressure >= 95 ? "error" : "warning", `RAM ${Math.round(memoryPressure)}%`)}`);
-					}
-					if ((systemState.diskUsedPercent ?? 0) >= 85) {
-						line3Segments.push(
-							` | ${theme.fg(systemState.diskUsedPercent! >= 95 ? "error" : "warning", `DISK ${systemState.diskUsedPercent}%`)}`,
-						);
-					}
-
-					if (systemState.battery !== undefined) line3Segments.push(` | 🔋 ${systemState.battery}%`);
-					if (durationSeconds >= 1) line3Segments.push(` | ⧗ ${formatDuration(durationSeconds)}`);
 					const cacheTotal = usage.cacheRead + usage.cacheWrite;
 					if (cacheTotal > 0) line3Segments.push(` | ❄ ${Math.round(usage.cacheRead * 100 / cacheTotal)}%`);
 					if (usage.input > 0 || usage.output > 0) {
@@ -1215,6 +1360,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) {
 						line3Segments.push(` | ${theme.fg("accent", "⇋ SSH")}`);
 					}
+					if (systemState.battery !== undefined) line3Segments.push(` | 🔋 ${systemState.battery}%`);
 					const line3 = fitSegments(line3Base, line3Segments, terminalWidth);
 
 					const lines = [line1, line2, line3].map((line) => truncateToWidth(line, terminalWidth, ""));

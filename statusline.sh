@@ -261,7 +261,7 @@ format_n() {
 
 TIME_STR="🕐 $(date +%H:%M)"
 
-# Battery (Linux — skip if missing)
+# Battery (Linux sysfs, macOS pmset — hidden on machines without one)
 BATTERY_STR=""
 for bat in /sys/class/power_supply/BAT0 /sys/class/power_supply/BAT1; do
   if [ -r "$bat/capacity" ]; then
@@ -269,6 +269,98 @@ for bat in /sys/class/power_supply/BAT0 /sys/class/power_supply/BAT1; do
     break
   fi
 done
+if [ -z "$BATTERY_STR" ] && [[ "$OSTYPE" == darwin* ]]; then
+  # " -InternalBattery-0 (id=…)	85%; charging; 1:02 remaining present: true"
+  bat_pct=$(/usr/bin/pmset -g batt 2>/dev/null | awk '/InternalBattery/ { if (match($0, /[0-9]+%/)) print substr($0, RSTART, RLENGTH - 1); exit }')
+  [ -n "$bat_pct" ] && BATTERY_STR=" | 🔋 ${bat_pct}%"
+fi
+
+# Host load — readers print "<load1> <cores> <mem_total_kb> <mem_used_kb> <swap_total_kb> <swap_used_kb>"
+# Linux: used RAM = MemTotal − MemAvailable (matches `free`)
+read_host_linux() {
+  [ -r /proc/loadavg ] && [ -r /proc/meminfo ] || return
+  local load1 cores
+  read -r load1 _ < /proc/loadavg
+  cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+  awk -v load="$load1" -v cores="$cores" '
+    /^MemTotal:/                   { total = $2 }
+    /^MemAvailable:/               { avail = $2; has_avail = 1 }
+    /^(MemFree|Buffers|Cached):/   { legacy += $2 }
+    /^SwapTotal:/                  { swap_total = $2 }
+    /^SwapFree:/                   { swap_free = $2 }
+    END {
+      if (!has_avail) avail = legacy   # kernels older than 3.14
+      if (total > 0) printf "%s %d %d %d %d %d\n", load, cores, total, total - avail, swap_total, swap_total - swap_free
+    }' /proc/meminfo
+}
+
+# macOS: used RAM = app (anonymous − purgeable) + wired + compressed (matches Activity Monitor)
+read_host_darwin() {
+  { /usr/sbin/sysctl vm.loadavg hw.ncpu hw.memsize vm.swapusage; /usr/bin/vm_stat; } 2>/dev/null | awk '
+    function to_kb(v,   n, u) {
+      n = v + 0; u = substr(v, length(v))
+      if (u == "G") return n * 1048576
+      if (u == "K") return n
+      return n * 1024   # sysctl reports swap in M
+    }
+    { val = $NF; sub(/\.$/, "", val) }
+    $1 == "vm.loadavg:"   { load = $3 }
+    $1 == "hw.ncpu:"      { cores = $2 }
+    $1 == "hw.memsize:"   { mem_total = $2 / 1024 }
+    $1 == "vm.swapusage:" {
+      for (i = 2; i < NF; i++) {
+        if ($i == "total") swap_total = to_kb($(i + 2))
+        if ($i == "used") swap_used = to_kb($(i + 2))
+      }
+    }
+    /page size of/                   { page_kb = $(NF - 1) / 1024 }
+    /^Pages wired down:/             { wired = val }
+    /^Pages purgeable:/              { purgeable = val }
+    /^Pages active:/                 { active = val }
+    /^Anonymous pages:/              { anon = val; has_anon = 1 }
+    /^Pages occupied by compressor:/ { compressed = val }
+    END {
+      if (!page_kb || !mem_total) exit
+      app = has_anon ? anon - purgeable : active
+      printf "%s %d %d %d %d %d\n", load, cores, mem_total, (app + wired + compressed) * page_kb, swap_total, swap_used
+    }'
+}
+
+# Reader line → "<load> <cpu_pct> <mem_used/totalG> <mem_pct> [<swap_used/totalG> <swap_pct>]"
+# cpu_pct is load per core; swap fields are omitted when there is no swap
+format_host() {
+  awk 'function gb(kb,   g) { g = kb / 1048576; return sprintf(g >= 10 ? "%.0f" : "%.1f", g) }
+    NF == 6 {
+      cores = $2 > 0 ? $2 : 1
+      printf "%.2f %d %.1f/%sG %d", $1, $1 * 100 / cores, $4 / 1048576, gb($3), ($3 > 0 ? $4 * 100 / $3 : 0)
+      if ($5 > 0) printf " %.1f/%sG %d", $6 / 1048576, gb($5), $6 * 100 / $5
+      printf "\n"
+    }'
+}
+
+# Green <60%, yellow 60–79%, red ≥80%
+threshold_color() {
+  if [ "$1" -ge 80 ]; then echo '\033[31m'; elif [ "$1" -ge 60 ]; then echo '\033[33m'; else echo '\033[32m'; fi
+}
+
+# Nerd Font icons: nf-md-cpu_64_bit (U+F0EE0), nf-md-memory (U+F035B), nf-md-sync (U+F04E6)
+ICON_CPU="󰻠"
+ICON_RAM="󰍛"
+ICON_SWAP="󰓦"
+
+HOST_STR=""
+case "$OSTYPE" in
+  linux*)  HOST_RAW=$(read_host_linux) ;;
+  darwin*) HOST_RAW=$(read_host_darwin) ;;
+  *)       HOST_RAW="" ;;
+esac
+if [ -n "$HOST_RAW" ]; then
+  read -r H_LOAD H_CPU_PCT H_MEM H_MEM_PCT H_SWAP H_SWAP_PCT <<< "$(format_host <<< "$HOST_RAW")"
+  if [ -n "$H_MEM_PCT" ]; then
+    HOST_STR=" | $(threshold_color "$H_CPU_PCT")${ICON_CPU} ${H_LOAD}${RESET} | $(threshold_color "$H_MEM_PCT")${ICON_RAM} ${H_MEM}${RESET}"
+    [ -n "$H_SWAP_PCT" ] && HOST_STR+=" | $(threshold_color "$H_SWAP_PCT")${ICON_SWAP} ${H_SWAP}${RESET}"
+  fi
+fi
 
 # Tokens in/out
 TOKENS_STR=""
@@ -319,4 +411,4 @@ fi
 
 echo -e "💻 ${BLUE}[${RESET}${CYAN}$USER${RESET}${BLUE}@${HOSTNAME:-$(hostname)}]${RESET} ▸ ${YELLOW}$DIR${RESET}${BRANCH_STR}${COMMIT_AGE_STR}${CI_STR}${GIT_DIRTY_STR}${GIT_AHEAD_STR}${GIT_STASH_STR}${WORKTREE_STR}"
 echo -e "⚡ ${COLOR}[${BAR}] ${PCT}%${RESET}${LIMITS_STR}${COST_STR}${BURN_STR} | ✦ $MODEL$EFFORT_STR"
-echo -e "${TIME_STR}${BATTERY_STR}${DUR_STR}${CACHE_STR}${TOKENS_STR}${ENV_STR}${TMUX_STR}${SSH_STR}"
+echo -e "${TIME_STR}${DUR_STR}${HOST_STR}${CACHE_STR}${TOKENS_STR}${ENV_STR}${TMUX_STR}${SSH_STR}${BATTERY_STR}"
