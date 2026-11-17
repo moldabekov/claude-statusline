@@ -282,7 +282,8 @@ read_host_linux() {
   local load1 cores
   read -r load1 _ < /proc/loadavg
   cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-  awk -v load="$load1" -v cores="$cores" '
+  # Avoid naming awk variables "load": gawk reserves it (@load) and aborts
+  awk -v load1="$load1" -v cores="$cores" '
     /^MemTotal:/                   { total = $2 }
     /^MemAvailable:/               { avail = $2; has_avail = 1 }
     /^(MemFree|Buffers|Cached):/   { legacy += $2 }
@@ -290,7 +291,7 @@ read_host_linux() {
     /^SwapFree:/                   { swap_free = $2 }
     END {
       if (!has_avail) avail = legacy   # kernels older than 3.14
-      if (total > 0) printf "%s %d %d %d %d %d\n", load, cores, total, total - avail, swap_total, swap_total - swap_free
+      if (total > 0) printf "%s %d %d %d %d %d\n", load1, cores, total, total - avail, swap_total, swap_total - swap_free
     }' /proc/meminfo
 }
 
@@ -304,7 +305,7 @@ read_host_darwin() {
       return n * 1024   # sysctl reports swap in M
     }
     { val = $NF; sub(/\.$/, "", val) }
-    $1 == "vm.loadavg:"   { load = $3 }
+    $1 == "vm.loadavg:"   { load1 = $3 }
     $1 == "hw.ncpu:"      { cores = $2 }
     $1 == "hw.memsize:"   { mem_total = $2 / 1024 }
     $1 == "vm.swapusage:" {
@@ -322,7 +323,7 @@ read_host_darwin() {
     END {
       if (!page_kb || !mem_total) exit
       app = has_anon ? anon - purgeable : active
-      printf "%s %d %d %d %d %d\n", load, cores, mem_total, (app + wired + compressed) * page_kb, swap_total, swap_used
+      printf "%s %d %d %d %d %d\n", load1, cores, mem_total, (app + wired + compressed) * page_kb, swap_total, swap_used
     }'
 }
 
