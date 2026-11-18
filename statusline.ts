@@ -1,6 +1,8 @@
-import { readFile, readdir, stat } from "node:fs/promises";
-import { cpus, freemem, hostname, loadavg, release, totalmem } from "node:os";
-import { basename, sep } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { cpus, freemem, homedir, hostname, loadavg, release, totalmem } from "node:os";
+import { basename, join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -610,6 +612,135 @@ function hostSegments(
 	return segments.filter((segment): segment is string => segment !== undefined).map((segment) => ` | ${segment}`);
 }
 
+// ---------- Update notice ----------
+// Compares this file's git blob SHA with statusline.ts on master (GitHub tree API).
+// Checked at most every 6 h; the cache files are shared with statusline.sh.
+const UPDATE_TREE_URL = "https://api.github.com/repos/moldabekov/claude-statusline/git/trees/master";
+const UPDATE_INTERVAL_MS = 21_600_000; // 6 h, same as statusline.sh
+const UPDATE_FETCH_TIMEOUT_MS = 10_000;
+const UPDATE_POLL_MS = 60_000; // re-read the cache, which the other agent may have refreshed
+const UPDATE_FILE = "statusline.ts";
+const UPDATE_TRACKED_FILES = ["statusline.sh", "statusline.ts"];
+const GIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const ICON_UPDATE = "\u{F06B0}"; // nf-md-update
+const ORANGE_BADGE = "\x1b[1;38;5;16;48;5;208m"; // bold black on orange
+const ANSI_RESET = "\x1b[0m";
+
+type UpdateCheckOptions = {
+	file: string;
+	ownPath: string;
+	cacheDir: string;
+	url: string;
+	nowMs: number;
+	fetchImpl: typeof fetch;
+	signal?: AbortSignal;
+};
+
+/** Git blob SHA-1: sha1("blob <byte length>\0" + bytes), as `git hash-object` prints it. */
+export function gitBlobSha(content: Uint8Array): string {
+	return createHash("sha1").update(`blob ${content.byteLength}\0`).update(content).digest("hex");
+}
+
+/** Tracked-file blob SHAs from a GitHub tree API response; anything malformed is dropped. */
+export function parseTreeShas(body: unknown): Record<string, string> {
+	const tree = (body as { tree?: unknown } | null)?.tree;
+	if (!Array.isArray(tree)) return {};
+	const entries = tree.flatMap((entry: { path?: unknown; type?: unknown; sha?: unknown } | null) => {
+		const { path, type, sha } = entry ?? {};
+		const valid =
+			type === "blob" && typeof path === "string" && UPDATE_TRACKED_FILES.includes(path) && typeof sha === "string" && GIT_SHA_PATTERN.test(sha);
+		return valid ? [[path, sha] as const] : [];
+	});
+	return Object.fromEntries(entries);
+}
+
+export function formatUpdateCache(shas: Record<string, string>): string {
+	return Object.entries(shas)
+		.map(([path, sha]) => `${sha} ${path}\n`)
+		.join("");
+}
+
+/** Reads `<sha> <path>` lines (as written by either agent); anything malformed is dropped. */
+export function parseUpdateCache(text: string): Record<string, string> {
+	const entries = text.split("\n").flatMap((line) => {
+		const [sha, path, ...rest] = line.trim().split(/\s+/);
+		const valid = rest.length === 0 && GIT_SHA_PATTERN.test(sha ?? "") && UPDATE_TRACKED_FILES.includes(path ?? "");
+		return valid ? [[path, sha] as const] : [];
+	});
+	return Object.fromEntries(entries);
+}
+
+/** The stamp holds epoch seconds of the last attempt; a missing or garbage stamp is due. */
+export function isUpdateCheckDue(stampText: string | undefined, nowMs: number): boolean {
+	const stamp = stampText?.trim() ?? "";
+	if (!/^\d+$/.test(stamp)) return true;
+	return nowMs - Number(stamp) * 1_000 >= UPDATE_INTERVAL_MS;
+}
+
+async function readOptional(path: string): Promise<string | undefined> {
+	try {
+		return await readFile(path, "utf8");
+	} catch {
+		return undefined;
+	}
+}
+
+// Stamp first, then fetch, so failures also wait a full interval. Throws on any failure.
+async function refreshUpdateCache(options: UpdateCheckOptions): Promise<void> {
+	const stampPath = join(options.cacheDir, "update-checked");
+	if (!isUpdateCheckDue(await readOptional(stampPath), options.nowMs)) return;
+	await mkdir(options.cacheDir, { recursive: true });
+	await writeFile(stampPath, `${Math.floor(options.nowMs / 1_000)}\n`);
+	const response = await options.fetchImpl(options.url, {
+		headers: { Accept: "application/vnd.github+json" },
+		signal: options.signal,
+	});
+	if (!response.ok) return;
+	const shas = parseTreeShas(await response.json());
+	if (Object.keys(shas).length === 0) return;
+	const tmpPath = join(options.cacheDir, `update-master.${process.pid}.tmp`);
+	await writeFile(tmpPath, formatUpdateCache(shas));
+	await rename(tmpPath, join(options.cacheDir, "update-master"));
+}
+
+/** True when the cached master SHA for `file` is valid and differs from the own file. Never throws. */
+export async function checkForUpdate(options: UpdateCheckOptions): Promise<boolean> {
+	try {
+		await refreshUpdateCache(options);
+	} catch {
+		// Offline, rate-limited, aborted, or unwritable cache: fall back to the last cached result.
+	}
+	try {
+		const masterSha = parseUpdateCache((await readOptional(join(options.cacheDir, "update-master"))) ?? "")[options.file];
+		if (!masterSha) return false;
+		return gitBlobSha(await readFile(options.ownPath)) !== masterSha;
+	} catch {
+		// Own file unreadable: no basis for a notice.
+		return false;
+	}
+}
+
+export function updateNoticeLine(file: string): string {
+	return `${ORANGE_BADGE} ${ICON_UPDATE} Update available — ${file} changed on master · git pull && ./install.sh ${ANSI_RESET}`;
+}
+
+// Pi's loader (jiti) sets import.meta.url to the extension's file; fall back to the install path.
+function updateOwnPath(): string {
+	try {
+		const ownPath = fileURLToPath(import.meta.url);
+		if (basename(ownPath) === UPDATE_FILE) return ownPath;
+	} catch {
+		// Not a file: URL (e.g. a bundled build); use the install location.
+	}
+	const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+	return join(agentDir, "extensions", UPDATE_FILE);
+}
+
+function updateCacheDir(): string {
+	const cacheHome = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+	return process.env.STATUSLINE_UPDATE_CACHE || join(cacheHome, "claude-statusline");
+}
+
 export default function statuslineExtension(pi: ExtensionAPI) {
 	let rateWindows: RateWindow[] = [];
 	let rateProvider: string | undefined;
@@ -700,6 +831,10 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 			let hostMemory: HostMemory | undefined;
 			let hostRefreshRunning = false;
 			let lastHostRefresh = 0;
+			let updateAvailable = false;
+			let updateRefreshRunning = false;
+			let lastUpdateRefresh = 0;
+			const updateCheckEnabled = process.env.STATUSLINE_UPDATE_CHECK !== "0";
 			const abortController = new AbortController();
 
 			const localRequestRender = () => {
@@ -1122,6 +1257,29 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					});
 			};
 
+			const scheduleUpdateRefresh = () => {
+				if (disposed || updateRefreshRunning || !updateCheckEnabled) return;
+				updateRefreshRunning = true;
+				lastUpdateRefresh = Date.now();
+				void checkForUpdate({
+					file: UPDATE_FILE,
+					ownPath: updateOwnPath(),
+					cacheDir: updateCacheDir(),
+					url: process.env.STATUSLINE_UPDATE_URL || UPDATE_TREE_URL,
+					nowMs: Date.now(),
+					fetchImpl: fetch,
+					signal: AbortSignal.any([abortController.signal, AbortSignal.timeout(UPDATE_FETCH_TIMEOUT_MS)]),
+				})
+					.then((available) => {
+						if (disposed || available === updateAvailable) return;
+						updateAvailable = available;
+						localRequestRender();
+					})
+					.finally(() => {
+						updateRefreshRunning = false;
+					});
+			};
+
 			const unsubscribeBranch = footerData.onBranchChange(() => {
 				scheduleGitRefresh();
 				localRequestRender();
@@ -1130,6 +1288,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 			scheduleGitRefresh();
 			scheduleSystemRefresh();
 			scheduleHostRefresh();
+			scheduleUpdateRefresh();
 			const timer = setInterval(() => {
 				if (disposed) return;
 				localRequestRender();
@@ -1137,6 +1296,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 				if (now - lastGitRefresh >= 10_000) scheduleGitRefresh();
 				if (now - lastSystemRefresh >= 60_000) scheduleSystemRefresh();
 				if (now - lastHostRefresh >= 10_000) scheduleHostRefresh();
+				if (now - lastUpdateRefresh >= UPDATE_POLL_MS) scheduleUpdateRefresh();
 			}, 1_000);
 
 			return {
@@ -1363,7 +1523,8 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					if (systemState.battery !== undefined) line3Segments.push(` | 🔋 ${systemState.battery}%`);
 					const line3 = fitSegments(line3Base, line3Segments, terminalWidth);
 
-					const lines = [line1, line2, line3].map((line) => truncateToWidth(line, terminalWidth, ""));
+					const baseLines = updateAvailable ? [line1, line2, line3, updateNoticeLine(UPDATE_FILE)] : [line1, line2, line3];
+					const lines = baseLines.map((line) => truncateToWidth(line, terminalWidth, ""));
 					const statuses = Array.from(footerData.getExtensionStatuses().entries())
 						.sort(([left], [right]) => left.localeCompare(right))
 						.map(([, text]) => cleanStatus(text))

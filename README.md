@@ -58,6 +58,7 @@ automatically; restart Pi or run `/reload` after installation.
 - `bash`
 - `git` for repository segments
 - `jq` for the Claude Code statusline
+- `curl` for the Claude Code update notice
 - A [Nerd Font](https://www.nerdfonts.com/) in your terminal for the CPU, RAM, and swap icons
 - Optional: authenticated [`gh`](https://cli.github.com/) for CI and pull-request data
 - Optional runtime CLIs (`go`, `python3`, `rustc`, `docker`, `kubectl`, and others) are queried by
@@ -137,6 +138,34 @@ extensions.
 - Ends with battery level (Linux sysfs or macOS `pmset`); as the last segment, it is the first to be
   dropped on narrow terminals
 
+## Update notice (line 4)
+
+Both statuslines add a fourth line, a bold black-on-orange badge, when your installed copy differs
+from the same file on `master`:
+
+```
+ 󰚰 Update available — statusline.sh changed on master · git pull && ./install.sh
+```
+
+- Claude Code checks only `statusline.sh` and Pi checks only `statusline.ts`. Commits that touch
+  neither (README, `install.sh`, docs) never trigger it.
+- At most every 6 hours, one request to the GitHub tree API fetches the git blob hashes of both
+  files on `master`. Each statusline compares its hash with that of its own installed file. No file
+  content is downloaded.
+- The result is cached in `${XDG_CACHE_HOME:-~/.cache}/claude-statusline/` and shared by both
+  agents, so they make one request per 6 hours between them.
+- Offline, GitHub errors, and rate limits (60 unauthenticated requests per hour per IP) show nothing.
+  The check never delays the statusline.
+- A local edit that you installed but haven't pushed also shows the notice, until you push and the
+  next check runs.
+- To update, run `git pull && ./install.sh` in your clone. The notice clears on the next render.
+
+| Variable | Effect |
+|---|---|
+| `STATUSLINE_UPDATE_CHECK=0` | Disables the check and the notice |
+| `STATUSLINE_UPDATE_CACHE` | Overrides the cache directory |
+| `STATUSLINE_UPDATE_URL` | Overrides the tree API URL (used by tests, or to point at a fork) |
+
 ## Performance
 
 ### Claude Code
@@ -157,6 +186,8 @@ extensions.
 
 - Edit `statusline.sh` for Claude Code.
 - Edit `statusline.ts` for Pi, then rerun `./install.sh` or copy it to the Pi extensions directory.
+- Run the tests with `bash tests/run.sh`. The TypeScript tests need Pi installed, because they borrow
+  its `pi-tui` package; set `PI_TUI_DIR` if it isn't found.
 - Icons, colors, thresholds, refresh intervals, and segment ordering are inline in each file.
 - Pi colors use the active Pi theme and update automatically when the theme changes.
 
@@ -167,6 +198,8 @@ extensions.
 - **Claude installation reports missing `jq`:** install `jq`, then rerun `./install.sh`.
 - **Pi statusline does not appear:** restart Pi or run `/reload`.
 - **CI/PR data is absent:** install `gh` and run `gh auth login`.
+- **Update notice stays after you pushed:** the cached `master` hashes refresh only every 6 hours.
+  Delete `~/.cache/claude-statusline/update-checked` to check on the next render.
 - **Battery, runtime, cloud, tmux, or SSH segments are absent:** these are conditional and hide when
   unavailable or irrelevant to the current project.
 - **Host icon renders narrow:** swap `💻` for `🏠`, `🖥`, or `🏡` in the relevant statusline file.

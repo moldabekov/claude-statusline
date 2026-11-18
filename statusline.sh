@@ -410,6 +410,56 @@ if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
   SSH_STR=" | ${CYAN}⇋ SSH${RESET}"
 fi
 
+# ---------- Update notice (line 4) ----------
+# Compares this file's git blob SHA with statusline.sh on master (GitHub tree API).
+# Checked at most every 6h; the cache is shared with the Pi extension.
+UPDATE_TREE_URL="https://api.github.com/repos/moldabekov/claude-statusline/git/trees/master"
+UPDATE_INTERVAL=21600
+UPDATE_FILE="statusline.sh"
+UPDATE_NOTICE=" 󰚰 Update available — ${UPDATE_FILE} changed on master · git pull && ./install.sh "
+ORANGE_BADGE='\033[1;38;5;16;48;5;208m'
+
+update_cache_dir() {
+  echo "${STATUSLINE_UPDATE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline}"
+}
+
+# Stamp first, then fetch in the background, so failures also wait a full interval
+update_check_start() {
+  local cache=$1 last now
+  last=$(cat "$cache/update-checked")
+  now=$(date +%s)
+  if [[ "$last" =~ ^[0-9]+$ ]] && [ $((now - last)) -lt "$UPDATE_INTERVAL" ]; then return; fi
+  mkdir -p "$cache" && echo "$now" > "$cache/update-checked" || return
+  (
+    tmp="$cache/update-tree.$$"
+    if curl -fsS --max-time 10 "${STATUSLINE_UPDATE_URL:-$UPDATE_TREE_URL}" -o "$tmp"; then
+      jq -r '.tree[]? | select(.type == "blob" and (.path == "statusline.sh" or .path == "statusline.ts")) | "\(.sha) \(.path)"' "$tmp" \
+        | grep -E '^[0-9a-f]{40} statusline\.(sh|ts)$' > "$tmp.master"
+      [ -s "$tmp.master" ] && mv "$tmp.master" "$cache/update-master"
+    fi
+    rm -f "$tmp" "$tmp.master"
+  ) &>/dev/null &
+}
+
+update_notice() {
+  local cache=$1 master own
+  master=$(awk -v f="$UPDATE_FILE" '$2 == f { print $1; exit }' "$cache/update-master")
+  [[ "$master" =~ ^[0-9a-f]{40}$ ]] || return
+  own=$(git hash-object --no-filters "${BASH_SOURCE[0]}")
+  if [[ "$own" =~ ^[0-9a-f]{40}$ ]] && [ "$own" != "$master" ]; then
+    echo "${ORANGE_BADGE}${UPDATE_NOTICE}${RESET}"
+  fi
+}
+
+UPDATE_STR=""
+if [ "${STATUSLINE_UPDATE_CHECK:-1}" != "0" ]; then
+  UPDATE_CACHE=$(update_cache_dir)
+  update_check_start "$UPDATE_CACHE" 2>/dev/null
+  UPDATE_STR=$(update_notice "$UPDATE_CACHE" 2>/dev/null)
+fi
+
 echo -e "💻 ${BLUE}[${RESET}${CYAN}$USER${RESET}${BLUE}@${HOSTNAME:-$(hostname)}]${RESET} ▸ ${YELLOW}$DIR${RESET}${BRANCH_STR}${COMMIT_AGE_STR}${CI_STR}${GIT_DIRTY_STR}${GIT_AHEAD_STR}${GIT_STASH_STR}${WORKTREE_STR}"
 echo -e "⚡ ${COLOR}[${BAR}] ${PCT}%${RESET}${LIMITS_STR}${COST_STR}${BURN_STR} | ✦ $MODEL$EFFORT_STR"
 echo -e "${TIME_STR}${DUR_STR}${HOST_STR}${CACHE_STR}${TOKENS_STR}${ENV_STR}${TMUX_STR}${SSH_STR}${BATTERY_STR}"
+# `if`, not `&&`: an empty notice must not make the script exit non-zero
+if [ -n "$UPDATE_STR" ]; then echo -e "$UPDATE_STR"; fi
