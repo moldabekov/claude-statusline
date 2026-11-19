@@ -81,4 +81,8 @@ install_pi_statusline() {
 if $HAS_PI; then install_pi_statusline; fi
 if $HAS_CLAUDE; then install_claude_statusline; fi
 
+# Offer Symbols Nerd Font when no Nerd Fonts v3 font is found (asks before installing)
+bash "$SCRIPT_DIR/install-fonts.sh" ||
+  echo "Fonts: not installed; the statusline still works, but icons may show as boxes."
+
 echo "Done. Restart detected agents to load their statuslines (or run /reload in Pi)."

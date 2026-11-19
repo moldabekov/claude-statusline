@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { cpus, freemem, homedir, hostname, loadavg, release, totalmem } from "node:os";
 import { basename, join, sep } from "node:path";
@@ -76,8 +77,13 @@ type ActiveToolState = {
 	startedAt: number;
 };
 
+type BatteryState = {
+	percent: number;
+	plugged: boolean;
+};
+
 type SystemState = {
-	battery?: number;
+	battery?: BatteryState;
 	goVersion?: string;
 	goWorkspace?: boolean;
 	node?: string;
@@ -512,6 +518,90 @@ const KB_PER_GB = 1_048_576;
 // Nerd Font icons
 const ICON_CPU = "\u{F0EE0}"; // nf-md-cpu_64_bit
 const ICON_RAM = "\u{F035B}"; // nf-md-memory
+const ICON_CONTEXT = "\u{F09D1}"; // nf-md-brain
+const ICON_BRANCH = "\u{F062C}"; // nf-md-source_branch
+const ICON_COMMIT = "\u{F0718}"; // nf-md-source_commit
+const ICON_COMMENT = "\u{F0182}"; // nf-md-comment_outline
+const ICON_LIMITS = "\u{F04C5}"; // nf-md-speedometer
+const ICON_COST = "\u{F01C1}"; // nf-md-currency_usd
+const ICON_BURN = "\u{F0238}"; // nf-md-fire
+const ICON_MODEL = "\u{F0674}"; // nf-md-creation
+const ICON_DURATION = "\u{F051B}"; // nf-md-timer_outline
+const ICON_CACHE = "\u{F0717}"; // nf-md-snowflake
+const ICON_TOKENS = "\u{F04E2}"; // nf-md-swap_vertical
+const ICON_GO = "\u{F07D3}"; // nf-md-language_go
+const ICON_NODE = "\u{F0399}"; // nf-md-nodejs
+const ICON_PYTHON = "\u{F0320}"; // nf-md-language_python
+const ICON_RUST = "\u{E68B}"; // nf-seti-rust
+const ICON_ZIG = "\u{E6A9}"; // nf-seti-zig
+const ICON_JAVA = "\u{F0B37}"; // nf-md-language_java
+const ICON_TERRAFORM = "\u{F1062}"; // nf-md-terraform
+const ICON_CONTAINER = "\u{F01A7}"; // nf-md-cube_outline
+const ICON_DOCKER = "\u{F0868}"; // nf-md-docker
+const ICON_KUBERNETES = "\u{F10FE}"; // nf-md-kubernetes
+const ICON_AWS = "\u{F0E0F}"; // nf-md-aws
+const ICON_TMUX = "\u{F489}"; // nf-oct-terminal
+const ICON_SSH = "\u{F0318}"; // nf-md-lan_connect
+
+// Host OS logos (nf-linux), keyed by the os-release ID
+const OS_ICONS: Record<string, string> = {
+	almalinux: "\u{F31D}",
+	alpine: "\u{F300}",
+	arch: "\u{F303}",
+	centos: "\u{F304}",
+	debian: "\u{F306}",
+	elementary: "\u{F309}",
+	endeavouros: "\u{F322}",
+	fedora: "\u{F30A}",
+	freebsd: "\u{F30C}",
+	gentoo: "\u{F30D}",
+	kali: "\u{F327}",
+	linuxmint: "\u{F30E}",
+	manjaro: "\u{F312}",
+	nixos: "\u{F313}",
+	opensuse: "\u{F314}",
+	pop: "\u{F32A}",
+	raspbian: "\u{F315}",
+	rhel: "\u{F316}",
+	rocky: "\u{F32B}",
+	ubuntu: "\u{F31B}",
+	void: "\u{F32E}",
+	zorin: "\u{F32F}",
+};
+const ICON_APPLE = "\u{F302}"; // nf-linux-apple
+const ICON_WINDOWS = "\u{F17A}"; // nf-fa-windows
+const ICON_TUX = "\u{F31A}"; // nf-linux-tux
+
+/** Distro logo from the os-release ID (any opensuse-* flavour), else by platform; Tux when unknown. */
+export function osIcon(platform: string, osReleaseId: string | undefined): string {
+	const id = osReleaseId?.startsWith("opensuse") ? "opensuse" : osReleaseId;
+	if (id && OS_ICONS[id]) return OS_ICONS[id];
+	if (id) return ICON_TUX;
+	if (platform === "darwin") return ICON_APPLE;
+	if (platform === "freebsd") return OS_ICONS.freebsd;
+	if (platform === "win32") return ICON_WINDOWS;
+	return ICON_TUX;
+}
+
+/** The `ID=` value of /etc/os-release, without quotes. */
+export function parseOsReleaseId(text: string): string | undefined {
+	return text.match(/^ID=["']?([^"'\n]*)["']?$/m)?.[1] || undefined;
+}
+
+function detectOsIcon(): string {
+	try {
+		return osIcon(process.platform, parseOsReleaseId(readFileSync("/etc/os-release", "utf8")));
+	} catch {
+		// No os-release (macOS, Windows): fall back by platform.
+		return osIcon(process.platform, undefined);
+	}
+}
+
+/** nf-md-clock_time_one_outline … twelve_outline: the hands show the current hour. */
+export function clockIcon(hour: number): string {
+	const hour12 = hour % 12 || 12;
+	return String.fromCodePoint(0xf144a + hour12);
+}
 const ICON_SWAP = "\u{F04E6}"; // nf-md-sync
 
 // Linux: used RAM = MemTotal − MemAvailable (matches `free`); MemFree + Buffers + Cached before kernel 3.14.
@@ -610,6 +700,42 @@ function hostSegments(
 			: undefined,
 	];
 	return segments.filter((segment): segment is string => segment !== undefined).map((segment) => ` | ${segment}`);
+}
+
+// ---------- Battery ----------
+// nf-md-battery_10 … battery (100), and nf-md-battery_charging_10 … charging_100
+const BATTERY_ICONS = [
+	"\u{F007A}", "\u{F007B}", "\u{F007C}", "\u{F007D}", "\u{F007E}",
+	"\u{F007F}", "\u{F0080}", "\u{F0081}", "\u{F0082}", "\u{F0079}",
+];
+const BATTERY_CHARGING_ICONS = [
+	"\u{F089C}", "\u{F0086}", "\u{F0087}", "\u{F0088}", "\u{F089D}",
+	"\u{F0089}", "\u{F089E}", "\u{F008A}", "\u{F008B}", "\u{F0085}",
+];
+
+/** Icon that fills in 10% steps; the charging variant while plugged in. */
+export function batteryIcon(percent: number, plugged: boolean): string {
+	const index = clamp(Math.floor((percent + 5) / 10) - 1, 0, 9);
+	return (plugged ? BATTERY_CHARGING_ICONS : BATTERY_ICONS)[index];
+}
+
+/** Green above 40%, yellow 21–40%, red at 20% or below. */
+export function batteryColor(percent: number): MeterColor {
+	if (percent <= 20) return "error";
+	if (percent <= 40) return "warning";
+	return "success";
+}
+
+/** Linux sysfs `status`: plugged in unless discharging or unknown. */
+export function isPluggedStatus(status: string | undefined): boolean {
+	return status === "Charging" || status === "Full" || status === "Not charging";
+}
+
+/** `pmset -g batt`: "Now drawing from 'AC Power'" then " -InternalBattery-0 (id=…)	85%; charging; …". */
+export function parsePmsetBattery(output: string): BatteryState | undefined {
+	const percent = finiteNumber(output.match(/InternalBattery[^\n]*?(\d+)%/)?.[1]);
+	if (percent === undefined) return undefined; // desktop Macs print no battery line
+	return { percent: clamp(Math.round(percent), 0, 100), plugged: output.includes("'AC Power'") };
 }
 
 // ---------- Update notice ----------
@@ -836,6 +962,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 			let lastUpdateRefresh = 0;
 			const updateCheckEnabled = process.env.STATUSLINE_UPDATE_CHECK !== "0";
 			const abortController = new AbortController();
+			const hostIcon = detectOsIcon();
 
 			const localRequestRender = () => {
 				if (!disposed) tui.requestRender();
@@ -1056,16 +1183,16 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 				const repoRoot = rootResult?.code === 0 ? clean(rootResult.stdout) || undefined : undefined;
 				const roots = projectRoots(cwd, repoRoot);
 				const runtimes = await detectProjectRuntimes(cwd, repoRoot);
-				const batteryPromise = (async () => {
+				const batteryPromise = (async (): Promise<BatteryState | undefined> => {
 					for (const battery of ["BAT0", "BAT1"]) {
 						const capacity = finiteNumber(await readTrimmed(`/sys/class/power_supply/${battery}/capacity`));
-						if (capacity !== undefined) return clamp(Math.round(capacity), 0, 100);
+						if (capacity === undefined) continue;
+						const status = await readTrimmed(`/sys/class/power_supply/${battery}/status`);
+						return { percent: clamp(Math.round(capacity), 0, 100), plugged: isPluggedStatus(status) };
 					}
 					if (process.platform !== "darwin") return undefined;
-					// " -InternalBattery-0 (id=…)	85%; charging; …"; desktop Macs print no battery line.
 					const result = await run("/usr/bin/pmset", ["-g", "batt"], 2_500);
-					const percent = result?.code === 0 ? finiteNumber(result.stdout.match(/InternalBattery[^\n]*?(\d+)%/)?.[1]) : undefined;
-					return percent === undefined ? undefined : clamp(Math.round(percent), 0, 100);
+					return result?.code === 0 ? parsePmsetBattery(result.stdout) : undefined;
 				})();
 				const goPromise = runtimes.go
 					? (async () => {
@@ -1331,7 +1458,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 							: terminalWidth >= 65
 								? theme.fg("accent", `${user}@${shortHost}`)
 								: "";
-					let line1Base = `💻${identity ? ` ${identity}` : ""} ▸ ${theme.fg("warning", displayedPath)}`;
+					let line1Base = `${hostIcon}${identity ? ` ${identity}` : ""} ▸ ${theme.fg("warning", displayedPath)}`;
 					const sessionName = clean(ctx.sessionManager.getSessionName() || "");
 					if (sessionName) {
 						const displayedSessionName = truncateToWidth(sessionName, terminalWidth < 110 ? 14 : 28, "…");
@@ -1344,7 +1471,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					if (branch) {
 						const cleanBranch = clean(branch);
 						const displayedBranch = terminalWidth < 110 ? truncateToWidth(cleanBranch, 16, "…") : cleanBranch;
-						line1Base += ` ⎇ ${theme.fg("accent", displayedBranch)}`;
+						line1Base += ` ${ICON_BRANCH} ${theme.fg("accent", displayedBranch)}`;
 					}
 
 					const renderCheckCounts = (label: string, counts: CheckCounts): string => {
@@ -1376,7 +1503,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 							label += " ○";
 							color = "warning";
 						}
-						if ((pr.unresolvedThreads ?? 0) > 0) label += ` 💬${pr.unresolvedThreads}`;
+						if ((pr.unresolvedThreads ?? 0) > 0) label += ` ${ICON_COMMENT} ${pr.unresolvedThreads}`;
 						line1Segments.push(` | ${theme.fg(color, label)}`);
 						if (checkCount(pr.checks) > 0) line1Segments.push(renderCheckCounts("CI", pr.checks));
 						if (checkCount(pr.tests) > 0) line1Segments.push(renderCheckCounts("T", pr.tests));
@@ -1421,7 +1548,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					if (gitState.behind > 0) divergence.push(`↓${gitState.behind}`);
 					if (divergence.length > 0) line1Segments.push(` | ${divergence.join(" ")}`);
 					if (gitState.commitEpoch !== undefined) {
-						line1Segments.push(` ⏳ ${formatAge(Date.now() / 1_000 - gitState.commitEpoch)}`);
+						line1Segments.push(` ${ICON_COMMIT} ${formatAge(Date.now() / 1_000 - gitState.commitEpoch)}`);
 					}
 					if (gitState.stash > 0) line1Segments.push(` | ≡${gitState.stash}`);
 					if (gitState.worktree) line1Segments.push(` | ${clean(gitState.worktree)}`);
@@ -1449,7 +1576,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 					const filled = contextPercent === undefined ? 0 : Math.floor(contextPercent / 10);
 					const bar = `${"█".repeat(filled)}${"░".repeat(10 - filled)}`;
 					const meter = `[${bar}] ${contextPercent === undefined ? "?" : `${contextPercent}%`}`;
-					let line2 = `⚡ ${
+					let line2 = `${ICON_CONTEXT} ${
 						contextPercent === undefined
 							? theme.fg("muted", meter)
 							: theme.fg(meterColor(contextPercent), meter)
@@ -1467,60 +1594,63 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 							const reset = window.resetAt ? ` ↻${formatReset(window.resetAt, now)}` : "";
 							return theme.fg(meterColor(percent), `${window.label}: ${percent}%${reset}`);
 						});
-						line2 += ` | ⏱ ${renderedLimits.join(" / ")}`;
+						line2 += ` | ${ICON_LIMITS} ${renderedLimits.join(" / ")}`;
 					}
-					if (usage.cost > 0) line2 += ` | $${usage.cost.toFixed(2)}`;
+					if (usage.cost > 0) line2 += ` | ${ICON_COST} ${usage.cost.toFixed(2)}`;
 
 					const durationSeconds = Math.max(0, (now - sessionStartedAt) / 1_000);
 					const billedTokens = usage.input + usage.output;
 					if (durationSeconds > 0 && billedTokens > 0) {
 						const tokensPerMinute = billedTokens / (durationSeconds / 60);
-						line2 += ` | 🔥 ${theme.fg(meterColor(tokensPerMinute >= 10_000 ? 100 : tokensPerMinute >= 3_000 ? 60 : 0), formatRate(tokensPerMinute))}`;
+						line2 += ` | ${ICON_BURN} ${theme.fg(meterColor(tokensPerMinute >= 10_000 ? 100 : tokensPerMinute >= 3_000 ? 60 : 0), formatRate(tokensPerMinute))}`;
 					}
 					const modelName = clean(currentModel?.name || currentModel?.id || "no-model");
 					const effort = thinking !== "off" ? ` (${thinking})` : "";
-					line2 += ` | ✦ ${modelName}${effort}`;
+					line2 += ` | ${ICON_MODEL} ${modelName}${effort}`;
 
 					const date = new Date(now);
-					const line3Base = `🕐 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+					const line3Base = `${clockIcon(date.getHours())} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 					const line3Segments: string[] = [];
-					if (durationSeconds >= 1) line3Segments.push(` | ⧗ ${formatDuration(durationSeconds)}`);
+					if (durationSeconds >= 1) line3Segments.push(` | ${ICON_DURATION} ${formatDuration(durationSeconds)}`);
 					line3Segments.push(
 						...hostSegments(hostMemory, systemState.diskUsedPercent, (color, text) => theme.fg(color, text)),
 					);
 					if (systemState.goVersion) {
-						line3Segments.push(` | Go ${clean(systemState.goVersion)}${systemState.goWorkspace ? " work" : ""}`);
+						line3Segments.push(` | ${ICON_GO} ${clean(systemState.goVersion)}${systemState.goWorkspace ? " work" : ""}`);
 					}
 					if (systemState.node) {
 						const nodeVersion = systemState.node.split(".").slice(0, 2).join(".");
-						line3Segments.push(` | ⬡ node${clean(nodeVersion)}`);
+						line3Segments.push(` | ${ICON_NODE} ${clean(nodeVersion)}`);
 					}
-					if (systemState.python) line3Segments.push(` | 🐍 ${clean(systemState.python)}`);
-					if (systemState.rust) line3Segments.push(` | 🦀 ${clean(systemState.rust)}`);
-					if (systemState.zig) line3Segments.push(` | Zig ${clean(systemState.zig)}`);
-					if (systemState.java) line3Segments.push(` | ☕ ${clean(systemState.java)}`);
-					if (systemState.terraform) line3Segments.push(` | TF ${clean(systemState.terraform)}`);
-					if (systemState.container) line3Segments.push(` | 📦 ${clean(systemState.container)}`);
-					if (systemState.dockerContext) line3Segments.push(` | 🐳 ${clean(systemState.dockerContext)}`);
+					if (systemState.python) line3Segments.push(` | ${ICON_PYTHON} ${clean(systemState.python)}`);
+					if (systemState.rust) line3Segments.push(` | ${ICON_RUST} ${clean(systemState.rust)}`);
+					if (systemState.zig) line3Segments.push(` | ${ICON_ZIG} ${clean(systemState.zig)}`);
+					if (systemState.java) line3Segments.push(` | ${ICON_JAVA} ${clean(systemState.java)}`);
+					if (systemState.terraform) line3Segments.push(` | ${ICON_TERRAFORM} ${clean(systemState.terraform)}`);
+					if (systemState.container) line3Segments.push(` | ${ICON_CONTAINER} ${clean(systemState.container)}`);
+					if (systemState.dockerContext) line3Segments.push(` | ${ICON_DOCKER} ${clean(systemState.dockerContext)}`);
 					if (systemState.kubeContext) {
 						const kubeParts = clean(systemState.kubeContext).split(/[/:]/).filter(Boolean);
 						const kubeContext = kubeParts.at(-1) || systemState.kubeContext;
-						line3Segments.push(` | ☸ ${kubeContext}`);
+						line3Segments.push(` | ${ICON_KUBERNETES} ${kubeContext}`);
 					}
 					if (systemState.awsProfile || systemState.awsRegion) {
-						line3Segments.push(` | ☁ ${[systemState.awsProfile, systemState.awsRegion].filter(Boolean).join("@")}`);
+						line3Segments.push(` | ${ICON_AWS} ${[systemState.awsProfile, systemState.awsRegion].filter(Boolean).join("@")}`);
 					}
 
 					const cacheTotal = usage.cacheRead + usage.cacheWrite;
-					if (cacheTotal > 0) line3Segments.push(` | ❄ ${Math.round(usage.cacheRead * 100 / cacheTotal)}%`);
+					if (cacheTotal > 0) line3Segments.push(` | ${ICON_CACHE} ${Math.round(usage.cacheRead * 100 / cacheTotal)}%`);
 					if (usage.input > 0 || usage.output > 0) {
-						line3Segments.push(` | ⇅ ${formatNumber(usage.input)} / ${formatNumber(usage.output)}`);
+						line3Segments.push(` | ${ICON_TOKENS} ${formatNumber(usage.input)} / ${formatNumber(usage.output)}`);
 					}
-					if (systemState.tmux) line3Segments.push(` | ${theme.fg("accent", `▦ ${clean(systemState.tmux)}`)}`);
+					if (systemState.tmux) line3Segments.push(` | ${theme.fg("accent", `${ICON_TMUX} ${clean(systemState.tmux)}`)}`);
 					if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) {
-						line3Segments.push(` | ${theme.fg("accent", "⇋ SSH")}`);
+						line3Segments.push(` | ${theme.fg("accent", `${ICON_SSH} SSH`)}`);
 					}
-					if (systemState.battery !== undefined) line3Segments.push(` | 🔋 ${systemState.battery}%`);
+					if (systemState.battery) {
+						const { percent, plugged } = systemState.battery;
+						line3Segments.push(` | ${theme.fg(batteryColor(percent), `${batteryIcon(percent, plugged)} ${percent}%`)}`);
+					}
 					const line3 = fitSegments(line3Base, line3Segments, terminalWidth);
 
 					const baseLines = updateAvailable ? [line1, line2, line3, updateNoticeLine(UPDATE_FILE)] : [line1, line2, line3];

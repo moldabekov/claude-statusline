@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import statuslineExtension, {
+import {
 	checkForUpdate,
 	formatUpdateCache,
 	gitBlobSha,
@@ -13,6 +13,7 @@ import statuslineExtension, {
 	parseUpdateCache,
 	updateNoticeLine,
 } from "../statusline.ts";
+import { type FooterComponent, mountFooter, withEnv } from "./footer-harness.ts";
 
 const STALE_SHA = "a".repeat(40);
 const SH_SHA = "c".repeat(40);
@@ -178,53 +179,7 @@ test("updateNoticeLine exact text", () => {
 	);
 });
 
-// ---------- footer wiring: drives the real extension with minimal Pi stand-ins ----------
-
-type FooterComponent = { render(width: number): string[]; dispose(): void };
-
-async function withEnv<T>(env: Record<string, string | undefined>, body: () => Promise<T>): Promise<T> {
-	const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
-	const apply = (values: Record<string, string | undefined>) => {
-		for (const [key, value] of Object.entries(values)) {
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
-	};
-	apply(env);
-	try {
-		return await body();
-	} finally {
-		apply(saved);
-	}
-}
-
-function mountFooter(cwd: string): FooterComponent {
-	const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
-	const pi = {
-		on: (name: string, handler: (event: unknown, ctx: unknown) => void) => handlers.set(name, handler),
-		exec: async () => ({ code: 1, stdout: "", stderr: "" }),
-		getThinkingLevel: () => "off",
-	};
-	statuslineExtension(pi as never);
-	let factory: ((tui: unknown, theme: unknown, footerData: unknown) => FooterComponent) | undefined;
-	const ctx = {
-		mode: "tui",
-		cwd,
-		model: undefined,
-		ui: { setFooter: (value: typeof factory) => (factory = value) },
-		sessionManager: { getEntries: () => [], getBranch: () => [], getHeader: () => undefined, getSessionName: () => undefined },
-		getContextUsage: () => undefined,
-		hasPendingMessages: () => false,
-		isIdle: () => true,
-	};
-	handlers.get("session_start")?.({}, ctx);
-	assert.ok(factory, "session_start should install a footer");
-	return factory(
-		{ requestRender: () => {} },
-		{ fg: (_color: string, text: string) => text },
-		{ onBranchChange: () => () => {}, getGitBranch: () => undefined, getExtensionStatuses: () => new Map() },
-	);
-}
+// ---------- footer wiring ----------
 
 async function renderAfterChecks(footer: FooterComponent, wantLines: number): Promise<string[]> {
 	for (let attempt = 0; attempt < 50 && footer.render(200).length !== wantLines; attempt++) {

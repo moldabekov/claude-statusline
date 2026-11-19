@@ -10,17 +10,17 @@ need a [Nerd Font](https://www.nerdfonts.com/); everything else renders with sta
 ### Claude Code
 
 ```text
-💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇ master ⏳ 38m | ✓ 5m | ●1 +2 ?1 | ↑2 ↓1 | ≡3
-⚡ [███░░░░░░░] 35% | ⏱ 5h: 12% ↻3h15m / 7d: 3% ↻Apr28 | $1.23 | 🔥 1.7K/m | ✦ Opus 4.7 (max)
-🕐 21:46 | ⧗ 1h15m | 󰻠 1.42 | 󰍛 9.8/16G | 󰓦 0.5/2.0G | ❄ 88% | ⇅ 125.0K / 4.5K | ☁ prod | 🐍 venv | ▦ work | ⇋ SSH | 🔋 82%
+ [user@host] ▸ ~/Work/Projects/git/claude-statusline 󰘬 master 󰜘 38m | ✓ 5m | ●1 +2 ?1 | ↑2 ↓1 | ≡3
+󰧑 [███░░░░░░░] 35% | 󰓅 5h: 12% ↻3h15m / 7d: 3% ↻Apr28 | 󰇁 1.23 | 󰈸 1.7K/m | 󰙴 Opus 4.7 (max)
+󱑓 21:46 | 󰔛 1h15m | 󰻠 1.42 | 󰍛 9.8/16G | 󰓦 0.5/2.0G | 󰜗 88% | 󰓢 125.0K / 4.5K | 󰸏 prod | 󰌠 venv |  work | 󰌘 SSH | 󰂁 82%
 ```
 
 ### Pi
 
 ```text
-💻 [user@host] ▸ ~/Work/Projects/git/claude-statusline ⎇ master | PR #42 ✓ | CI 5✓ | Δ+42−8 | ●1 ?1     ○ idle
-⚡ [███░░░░░░░] 35% | CTX 70.0K/200.0K · 130.0K left · ↻1 | $1.23 | 🔥 1.7K/m | ✦ Claude Opus 4.6 (high)
-🕐 21:46 | ⧗ 1h15m | 󰻠 1.42 | 󰍛 9.8/16G | 󰓦 0.5/2.0G | ⬡ node22.22 | 🐍 3.13@venv | 🦀 1.91.0 | ❄ 88% | ⇅ 125.0K / 4.5K | ▦ work | 🔋 82%
+ [user@host] ▸ ~/Work/Projects/git/claude-statusline 󰘬 master | PR #42 ✓ | CI 5✓ | Δ+42−8 | ●1 ?1     ○ idle
+󰧑 [███░░░░░░░] 35% | CTX 70.0K/200.0K · 130.0K left · ↻1 | 󰇁 1.23 | 󰈸 1.7K/m | 󰙴 Claude Opus 4.6 (high)
+󱑓 21:46 | 󰔛 1h15m | 󰻠 1.42 | 󰍛 9.8/16G | 󰓦 0.5/2.0G | 󰎙 22.22 | 󰌠 3.13@venv |  1.91.0 | 󰜗 88% | 󰓢 125.0K / 4.5K |  work | 󰂁 82%
 ```
 
 Pi adapts to terminal width, omitting lower-priority segments before truncating. It can also add a
@@ -53,13 +53,31 @@ The installer scans `PATH` and installs the matching statusline for every detect
 An existing Claude Code `statusLine` setting is left unchanged. Pi discovers the extension
 automatically; restart Pi or run `/reload` after installation.
 
+### Fonts
+
+The icons need a Nerd Fonts **v3** font. Version 2 fonts lack or misplace many of them. At the end,
+`install.sh` runs `install-fonts.sh`, which you can also run on its own:
+
+- It skips over SSH, because icons are drawn by the terminal on the machine you type on. It also
+  skips in Ghostty and WezTerm, which have the symbols built in, and when `fc-list` finds a font
+  that has the icons.
+- Otherwise it asks before installing (`[y/N]`, default no). On yes, it downloads Symbols Nerd
+  Font v3.5.1 (2.3 MB) from the Nerd Fonts GitHub release and checks it against a pinned SHA-256.
+  It then copies the two `.ttf` files into `~/Library/Fonts` (macOS) or
+  `~/.local/share/fonts/NerdFontsSymbolsOnly` (Linux, then `fc-cache -f`). No `sudo`, and your
+  terminal font stays as it is.
+- Run without a terminal (for example from a script), it only prints instructions.
+- Afterwards it prints one hint for your terminal: iTerm2 needs Symbols Nerd Font Mono as its
+  "non-ASCII" font, and VS Code needs it in `terminal.integrated.fontFamily`. Linux terminals pick
+  it up after a restart.
+
 ### Requirements
 
 - `bash`
 - `git` for repository segments
 - `jq` for the Claude Code statusline
 - `curl` for the Claude Code update notice
-- A [Nerd Font](https://www.nerdfonts.com/) in your terminal for the CPU, RAM, and swap icons
+- A [Nerd Font](https://www.nerdfonts.com/) v3 in your terminal for the icons (see [Fonts](#fonts))
 - Optional: authenticated [`gh`](https://cli.github.com/) for CI and pull-request data
 - Optional runtime CLIs (`go`, `python3`, `rustc`, `docker`, `kubectl`, and others) are queried by
   Pi only when matching project files are detected; missing tools are ignored
@@ -70,10 +88,10 @@ automatically; restart Pi or run `/reload` after installation.
 
 | Segment | Source | Notes |
 |---|---|---|
-| `💻 [user@host]` | `$USER`, `$HOSTNAME` | User cyan, brackets/host blue |
+| ` [user@host]` | OS logo, `$USER`, `$HOSTNAME` | Distro logo from `ID` in `/etc/os-release` (nf-linux), Apple on macOS, Tux when unknown; user cyan, brackets/host blue |
 | `▸ dir` | `.workspace.current_dir` | Yellow, `$HOME` contracted to `~` |
-| `⎇ branch` | Local Git | Cyan |
-| `⏳ age` | Latest commit | Seconds/minutes/hours/days ago |
+| `󰘬 branch` | Local Git | Cyan |
+| `󰜘 age` | Latest commit | Seconds/minutes/hours/days ago |
 | `✓ / ✗ / ⋯ / ○` | `gh run list` | Latest run for `HEAD`, including relative age |
 | `●N +N ?N` | `git status --porcelain` | Modified, staged, and untracked counts |
 | `↑N ↓N` | Git upstream | Ahead/behind counts when non-zero |
@@ -84,28 +102,28 @@ automatically; restart Pi or run `/reload` after installation.
 
 | Segment | Source | Notes |
 |---|---|---|
-| `⚡ [bar] NN%` | `.context_window.used_percentage` | Ten-cell threshold-colored context meter |
-| `⏱ 5h / 7d` | `.rate_limits` | Usage plus reset countdown/date |
-| `$N.NN` | `.cost.total_cost_usd` | Hidden when zero |
-| `🔥 N/m` | Tokens divided by active duration | Session-average token rate |
-| `✦ Model (effort)` | Model and transcript | Effort appears after an explicit `/effort` change |
+| `󰧑 [bar] NN%` | `.context_window.used_percentage` | Ten-cell threshold-colored context meter |
+| `󰓅 5h / 7d` | `.rate_limits` | Usage plus reset countdown/date |
+| `󰇁 N.NN` | `.cost.total_cost_usd` | Hidden when zero |
+| `󰈸 N/m` | Tokens divided by active duration | Session-average token rate |
+| `󰙴 Model (effort)` | Model and transcript | Effort appears after an explicit `/effort` change |
 
 ### Line 3 — telemetry
 
 | Segment | Source | Conditional |
 |---|---|---|
-| `🕐 HH:MM` | Local clock | Always |
-| `⧗ duration` | `.cost.total_duration_ms` | Hidden when zero |
+| `󱑓 HH:MM` | Local clock | Always; the clock's hands show the current hour |
+| `󰔛 duration` | `.cost.total_duration_ms` | Hidden when zero |
 | `󰻠 N.NN` | 1-minute load average (`/proc/loadavg`, `sysctl vm.loadavg`) | Linux and macOS; colored by load per core |
 | `󰍛 used/totalG` | Linux `MemTotal − MemAvailable`; macOS app + wired + compressed (`vm_stat`) | Linux and macOS; macOS uses the same components as Activity Monitor's "Memory Used" |
 | `󰓦 used/totalG` | Swap from `/proc/meminfo` or `sysctl vm.swapusage` | Hidden when no swap is configured |
-| `❄ NN%` | Cache read/write tokens | Hidden without cache tokens |
-| `⇅ in / out` | Context token totals | Hidden when both are zero |
-| `☁ profile` | `$AWS_PROFILE` | AWS profile set |
-| `🐍 env` | `$VIRTUAL_ENV` or `.python-version` | Python environment detected |
-| `▦ session` | tmux | Inside tmux |
-| `⇋ SSH` | SSH environment | Remote session |
-| `🔋 NN%` | Linux power supply or macOS `pmset -g batt` | Battery devices only; always the last segment |
+| `󰜗 NN%` | Cache read/write tokens | Hidden without cache tokens |
+| `󰓢 in / out` | Context token totals | Hidden when both are zero |
+| `󰸏 profile` | `$AWS_PROFILE` | AWS profile set |
+| `󰌠 env` | `$VIRTUAL_ENV` or `.python-version` | Python environment detected |
+| ` session` | tmux | Inside tmux |
+| `󰌘 SSH` | SSH environment | Remote session |
+| `󰂁 NN%` | Linux power supply or macOS `pmset -g batt` | Battery devices only; always the last segment. The icon fills in 10% steps and switches to a charging icon while plugged in. Green above 40%, yellow 21–40%, red at 20% or below |
 
 ## Pi statusline
 
@@ -135,8 +153,8 @@ extensions.
   Java, and Terraform
 - Detects containers, Docker context, Kubernetes context, AWS profile/region, tmux, and SSH
 - Includes cache ratio and cumulative input/output tokens
-- Ends with battery level (Linux sysfs or macOS `pmset`); as the last segment, it is the first to be
-  dropped on narrow terminals
+- Ends with battery level (Linux sysfs or macOS `pmset`), using the same icon and colors as Claude
+  Code; as the last segment, it is the first to be dropped on narrow terminals
 
 ## Update notice (line 4)
 
@@ -202,6 +220,8 @@ from the same file on `master`:
   Delete `~/.cache/claude-statusline/update-checked` to check on the next render.
 - **Battery, runtime, cloud, tmux, or SSH segments are absent:** these are conditional and hide when
   unavailable or irrelevant to the current project.
-- **Host icon renders narrow:** swap `💻` for `🏠`, `🖥`, or `🏡` in the relevant statusline file.
-- **CPU, RAM, or swap icon shows as a box:** the terminal font is not a Nerd Font. Install one, or
-  replace `ICON_CPU`, `ICON_RAM`, and `ICON_SWAP` in either file with plain symbols such as `▣ ▤ ⇄`.
+- **Wrong or generic host logo:** the logo comes from `ID` in `/etc/os-release`; distros without a
+  mapping show Tux. Add yours to `os_icon` in `statusline.sh` and `OS_ICONS` in `statusline.ts`.
+- **Icons show as boxes or wrong symbols:** the terminal has no Nerd Fonts v3 font. Run
+  `./install-fonts.sh` on the machine you type on, or replace the `ICON_*` constants and the battery,
+  clock, and OS logo lists near the top of either file with plain symbols.

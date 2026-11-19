@@ -17,6 +17,65 @@ CACHE_READ=$(echo "$input" | jq -r '.context_window.total_cache_read_tokens // 0
 CACHE_CREATE=$(echo "$input" | jq -r '.context_window.total_cache_creation_tokens // 0')
 DUR_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
 
+# Nerd Font icons (nf-md unless noted). Glyphs below U+F8FF are written as UTF-8 byte
+# escapes so they survive editors and copy-paste, and work in bash 3.2.
+ICON_CONTEXT="󰧑"      # nf-md-brain
+ICON_BRANCH="󰘬"       # nf-md-source_branch
+ICON_COMMIT="󰜘"       # nf-md-source_commit
+ICON_LIMITS="󰓅"       # nf-md-speedometer
+ICON_COST="󰇁"         # nf-md-currency_usd
+ICON_BURN="󰈸"         # nf-md-fire
+ICON_MODEL="󰙴"        # nf-md-creation
+ICON_DURATION="󰔛"     # nf-md-timer_outline
+ICON_CACHE="󰜗"        # nf-md-snowflake
+ICON_TOKENS="󰓢"       # nf-md-swap_vertical
+ICON_AWS="󰸏"          # nf-md-aws
+ICON_PYTHON="󰌠"       # nf-md-language_python
+ICON_TMUX=$'\xef\x92\x89'  # nf-oct-terminal (U+F489)
+ICON_SSH="󰌘"          # nf-md-lan_connect
+# nf-md-clock_time_one_outline … clock_time_twelve_outline
+CLOCK_ICONS=(󱑋 󱑌 󱑍 󱑎 󱑏 󱑐 󱑑 󱑒 󱑓 󱑔 󱑕 󱑖)
+
+# Host OS logo (nf-linux): distro from /etc/os-release, else by OS type; Tux when unknown
+OS_RELEASE="${STATUSLINE_OS_RELEASE:-/etc/os-release}"
+os_icon() {
+  local id=""
+  [ -r "$OS_RELEASE" ] && id=$(sed -n 's/^ID=//p' "$OS_RELEASE" | tr -d "\"'" | head -1)
+  case "$id" in
+    almalinux)   echo $'\xef\x8c\x9d' ;;
+    alpine)      echo $'\xef\x8c\x80' ;;
+    arch)        echo $'\xef\x8c\x83' ;;
+    centos)      echo $'\xef\x8c\x84' ;;
+    debian)      echo $'\xef\x8c\x86' ;;
+    elementary)  echo $'\xef\x8c\x89' ;;
+    endeavouros) echo $'\xef\x8c\xa2' ;;
+    fedora)      echo $'\xef\x8c\x8a' ;;
+    freebsd)     echo $'\xef\x8c\x8c' ;;
+    gentoo)      echo $'\xef\x8c\x8d' ;;
+    kali)        echo $'\xef\x8c\xa7' ;;
+    linuxmint)   echo $'\xef\x8c\x8e' ;;
+    manjaro)     echo $'\xef\x8c\x92' ;;
+    nixos)       echo $'\xef\x8c\x93' ;;
+    opensuse*)   echo $'\xef\x8c\x94' ;;
+    pop)         echo $'\xef\x8c\xaa' ;;
+    raspbian)    echo $'\xef\x8c\x95' ;;
+    rhel)        echo $'\xef\x8c\x96' ;;
+    rocky)       echo $'\xef\x8c\xab' ;;
+    ubuntu)      echo $'\xef\x8c\x9b' ;;
+    void)        echo $'\xef\x8c\xae' ;;
+    zorin)       echo $'\xef\x8c\xaf' ;;
+    "")
+      case "$OSTYPE" in
+        darwin*)  echo $'\xef\x8c\x82' ;;  # nf-linux-apple
+        freebsd*) echo $'\xef\x8c\x8c' ;;
+        msys*|cygwin*) echo $'\xef\x85\xba' ;;  # nf-fa-windows
+        *)        echo $'\xef\x8c\x9a' ;;  # nf-linux-tux
+      esac
+      ;;
+    *) echo $'\xef\x8c\x9a' ;;
+  esac
+}
+
 # Effort level from transcript (only shown when explicitly set)
 EFFORT=""
 if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
@@ -50,7 +109,7 @@ if [ -d "$DIR" ] && git -C "$DIR" rev-parse --git-dir &>/dev/null; then
     else
       age="${age_s}s"
     fi
-    COMMIT_AGE_STR=" ⏳ ${age}"
+    COMMIT_AGE_STR=" ${ICON_COMMIT} ${age}"
   fi
 
   # Dirty state (modified / staged / untracked)
@@ -204,16 +263,16 @@ LIMITS_STR=""
 R5_STR=$(format_limit "5h" "$RATE_5H" "$RATE_5H_RESET")
 R7_STR=$(format_limit "7d" "$RATE_7D" "$RATE_7D_RESET")
 if [ -n "$R5_STR" ] && [ -n "$R7_STR" ]; then
-  LIMITS_STR=" | ⏱ ${R5_STR} / ${R7_STR}"
+  LIMITS_STR=" | ${ICON_LIMITS} ${R5_STR} / ${R7_STR}"
 elif [ -n "$R5_STR" ] || [ -n "$R7_STR" ]; then
-  LIMITS_STR=" | ⏱ ${R5_STR}${R7_STR}"
+  LIMITS_STR=" | ${ICON_LIMITS} ${R5_STR}${R7_STR}"
 fi
 
 # Cost
 COST_STR=""
 if [ -n "$COST" ] && [ "$COST" != "0" ]; then
   COST_FMT=$(printf '%.2f' "$COST")
-  COST_STR=" | \$${COST_FMT}"
+  COST_STR=" | ${ICON_COST} ${COST_FMT}"
 fi
 
 # Burn rate (tokens per minute) — green <3K, yellow 3-10K, red >10K
@@ -235,7 +294,7 @@ if [ "$DUR_S" -gt 0 ] && [ "$((TOKENS_IN + TOKENS_OUT))" -gt 0 ]; then
   else
     BURN_COLOR='\033[32m'
   fi
-  BURN_STR=" | 🔥 ${BURN_COLOR}${rate_fmt}\033[0m"
+  BURN_STR=" | ${ICON_BURN} ${BURN_COLOR}${rate_fmt}\033[0m"
 fi
 
 BLUE='\033[34m'
@@ -244,7 +303,7 @@ CYAN='\033[36m'
 
 BRANCH_STR=""
 if [ -n "$BRANCH" ]; then
-  BRANCH_STR=" ⎇ ${CYAN}${BRANCH}${RESET}"
+  BRANCH_STR=" ${ICON_BRANCH} ${CYAN}${BRANCH}${RESET}"
 fi
 
 # ---------- Line 3 data ----------
@@ -259,20 +318,48 @@ format_n() {
   fi
 }
 
-TIME_STR="🕐 $(date +%H:%M)"
+read -r CLOCK_HOUR CLOCK_TIME <<< "$(date "+%I %H:%M")"
+TIME_STR="${CLOCK_ICONS[$(( 10#$CLOCK_HOUR - 1 ))]} ${CLOCK_TIME}"
 
 # Battery (Linux sysfs, macOS pmset — hidden on machines without one)
-BATTERY_STR=""
-for bat in /sys/class/power_supply/BAT0 /sys/class/power_supply/BAT1; do
+# Nerd Font nf-md-battery_10 … battery (100) and nf-md-battery_charging_10 … charging_100
+BATTERY_ICONS=(󰁺 󰁻 󰁼 󰁽 󰁾 󰁿 󰂀 󰂁 󰂂 󰁹)
+BATTERY_CHARGING_ICONS=(󰢜 󰂆 󰂇 󰂈 󰢝 󰂉 󰢞 󰂊 󰂋 󰂅)
+
+# Icon that fills in 10% steps; charging variant while plugged in: battery_icon <pct> <plugged 0|1>
+battery_icon() {
+  local i=$(( ($1 + 5) / 10 - 1 ))
+  (( i < 0 )) && i=0
+  (( i > 9 )) && i=9
+  if [ "$2" = 1 ]; then echo "${BATTERY_CHARGING_ICONS[$i]}"; else echo "${BATTERY_ICONS[$i]}"; fi
+}
+
+# Green >40%, yellow 21–40%, red ≤20%
+battery_color() {
+  if [ "$1" -le 20 ]; then echo '\033[31m'; elif [ "$1" -le 40 ]; then echo '\033[33m'; else echo '\033[32m'; fi
+}
+
+bat_pct=""
+bat_plugged=0
+POWER_SUPPLY="${STATUSLINE_POWER_SUPPLY:-/sys/class/power_supply}"
+for bat in "$POWER_SUPPLY/BAT0" "$POWER_SUPPLY/BAT1"; do
   if [ -r "$bat/capacity" ]; then
-    BATTERY_STR=" | 🔋 $(cat "$bat/capacity")%"
+    bat_pct=$(cat "$bat/capacity")
+    case "$(cat "$bat/status" 2>/dev/null)" in
+      Charging|Full|"Not charging") bat_plugged=1 ;;
+    esac
     break
   fi
 done
-if [ -z "$BATTERY_STR" ] && [[ "$OSTYPE" == darwin* ]]; then
-  # " -InternalBattery-0 (id=…)	85%; charging; 1:02 remaining present: true"
-  bat_pct=$(/usr/bin/pmset -g batt 2>/dev/null | awk '/InternalBattery/ { if (match($0, /[0-9]+%/)) print substr($0, RSTART, RLENGTH - 1); exit }')
-  [ -n "$bat_pct" ] && BATTERY_STR=" | 🔋 ${bat_pct}%"
+if [ -z "$bat_pct" ] && [[ "$OSTYPE" == darwin* ]]; then
+  # "Now drawing from 'AC Power'" then " -InternalBattery-0 (id=…)	85%; charging; …"
+  pmset_out=$(/usr/bin/pmset -g batt 2>/dev/null)
+  bat_pct=$(awk '/InternalBattery/ { if (match($0, /[0-9]+%/)) print substr($0, RSTART, RLENGTH - 1); exit }' <<< "$pmset_out")
+  [[ "$pmset_out" == *"'AC Power'"* ]] && bat_plugged=1
+fi
+BATTERY_STR=""
+if [[ "$bat_pct" =~ ^[0-9]+$ ]]; then
+  BATTERY_STR=" | $(battery_color "$bat_pct")$(battery_icon "$bat_pct" "$bat_plugged") ${bat_pct}%${RESET}"
 fi
 
 # Host load — readers print "<load1> <cores> <mem_total_kb> <mem_used_kb> <swap_total_kb> <swap_used_kb>"
@@ -366,48 +453,48 @@ fi
 # Tokens in/out
 TOKENS_STR=""
 if [ "$TOKENS_IN" -gt 0 ] || [ "$TOKENS_OUT" -gt 0 ]; then
-  TOKENS_STR=" | ⇅ $(format_n "$TOKENS_IN") / $(format_n "$TOKENS_OUT")"
+  TOKENS_STR=" | ${ICON_TOKENS} $(format_n "$TOKENS_IN") / $(format_n "$TOKENS_OUT")"
 fi
 
 # Cache hit ratio
 CACHE_STR=""
 if [ "$((CACHE_READ + CACHE_CREATE))" -gt 0 ]; then
   ratio=$(awk "BEGIN {printf \"%.0f\", $CACHE_READ*100/($CACHE_READ+$CACHE_CREATE)}")
-  CACHE_STR=" | ❄ ${ratio}%"
+  CACHE_STR=" | ${ICON_CACHE} ${ratio}%"
 fi
 
 # Session duration
 DUR_STR=""
 if [ "$DUR_S" -gt 0 ]; then
   if [ "$DUR_S" -ge 3600 ]; then
-    DUR_STR=" | ⧗ $((DUR_S/3600))h$((DUR_S%3600/60))m"
+    DUR_STR=" | ${ICON_DURATION} $((DUR_S/3600))h$((DUR_S%3600/60))m"
   elif [ "$DUR_S" -ge 60 ]; then
-    DUR_STR=" | ⧗ $((DUR_S/60))m"
+    DUR_STR=" | ${ICON_DURATION} $((DUR_S/60))m"
   else
-    DUR_STR=" | ⧗ ${DUR_S}s"
+    DUR_STR=" | ${ICON_DURATION} ${DUR_S}s"
   fi
 fi
 
 # Env metrics (conditional)
 ENV_STR=""
-[ -n "$AWS_PROFILE" ] && ENV_STR+=" | ☁ $AWS_PROFILE"
+[ -n "$AWS_PROFILE" ] && ENV_STR+=" | ${ICON_AWS} $AWS_PROFILE"
 if [ -n "$VIRTUAL_ENV" ]; then
-  ENV_STR+=" | 🐍 $(basename "$VIRTUAL_ENV")"
+  ENV_STR+=" | ${ICON_PYTHON} $(basename "$VIRTUAL_ENV")"
 elif [ -f "$DIR/.python-version" ]; then
-  ENV_STR+=" | 🐍 $(cat "$DIR/.python-version")"
+  ENV_STR+=" | ${ICON_PYTHON} $(cat "$DIR/.python-version")"
 fi
 
 # Tmux session
 TMUX_STR=""
 if [ -n "$TMUX" ]; then
   tmux_session=$(tmux display-message -p '#S' 2>/dev/null)
-  [ -n "$tmux_session" ] && TMUX_STR=" | ${CYAN}▦ ${tmux_session}${RESET}"
+  [ -n "$tmux_session" ] && TMUX_STR=" | ${CYAN}${ICON_TMUX} ${tmux_session}${RESET}"
 fi
 
 # SSH session indicator
 SSH_STR=""
 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
-  SSH_STR=" | ${CYAN}⇋ SSH${RESET}"
+  SSH_STR=" | ${CYAN}${ICON_SSH} SSH${RESET}"
 fi
 
 # ---------- Update notice (line 4) ----------
@@ -458,8 +545,8 @@ if [ "${STATUSLINE_UPDATE_CHECK:-1}" != "0" ]; then
   UPDATE_STR=$(update_notice "$UPDATE_CACHE" 2>/dev/null)
 fi
 
-echo -e "💻 ${BLUE}[${RESET}${CYAN}$USER${RESET}${BLUE}@${HOSTNAME:-$(hostname)}]${RESET} ▸ ${YELLOW}$DIR${RESET}${BRANCH_STR}${COMMIT_AGE_STR}${CI_STR}${GIT_DIRTY_STR}${GIT_AHEAD_STR}${GIT_STASH_STR}${WORKTREE_STR}"
-echo -e "⚡ ${COLOR}[${BAR}] ${PCT}%${RESET}${LIMITS_STR}${COST_STR}${BURN_STR} | ✦ $MODEL$EFFORT_STR"
+echo -e "$(os_icon) ${BLUE}[${RESET}${CYAN}$USER${RESET}${BLUE}@${HOSTNAME:-$(hostname)}]${RESET} ▸ ${YELLOW}$DIR${RESET}${BRANCH_STR}${COMMIT_AGE_STR}${CI_STR}${GIT_DIRTY_STR}${GIT_AHEAD_STR}${GIT_STASH_STR}${WORKTREE_STR}"
+echo -e "${ICON_CONTEXT} ${COLOR}[${BAR}] ${PCT}%${RESET}${LIMITS_STR}${COST_STR}${BURN_STR} | ${ICON_MODEL} $MODEL$EFFORT_STR"
 echo -e "${TIME_STR}${DUR_STR}${HOST_STR}${CACHE_STR}${TOKENS_STR}${ENV_STR}${TMUX_STR}${SSH_STR}${BATTERY_STR}"
 # `if`, not `&&`: an empty notice must not make the script exit non-zero
 if [ -n "$UPDATE_STR" ]; then echo -e "$UPDATE_STR"; fi
